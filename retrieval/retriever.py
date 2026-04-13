@@ -80,6 +80,8 @@ class Retriever:
             for key, value in metadata_filter.items():
                 if isinstance(value, str):
                     conditions.append(f'{key} == "{value}"')
+                else:
+                    conditions.append(f'{key} == {value}')
 
         return " and ".join(conditions)
 

@@ -2,6 +2,7 @@ from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import os
+import re
 import logging
 from pipeline import RAGPipeline
 from config import RAGConfig
@@ -22,6 +23,7 @@ rag_pipeline: Optional[RAGPipeline] = None
 class QueryRequest(BaseModel):
     query: str
     config_override: Optional[Dict[str, Any]] = None
+    metadata_filter: Optional[Dict[str, Any]] = None
 
 class IngestRequest(BaseModel):
     directory_path: str
@@ -54,15 +56,24 @@ async def health_check():
     }
     return status
 
+def strip_thought_process(text: str) -> str:
+    """Removes <think>...</think> blocks from reasoning models like Qwen/DeepSeek."""
+    return re.sub(r'<think>.*?</think>', '', text, flags=re.DOTALL).strip()
+
 @app.post("/query", response_model=RAGResponse)
 async def query_rag(request: QueryRequest):
     if not rag_pipeline:
         raise HTTPException(status_code=503, detail="RAG Pipeline not initialized")
     
     try:
-        result = rag_pipeline.query(request.query)
+        # Pass filters to the pipeline if provided
+        result = rag_pipeline.query(request.query, metadata_filter=request.metadata_filter)
+        
+        # Clean answer from reasoning tags
+        clean_answer = strip_thought_process(result.answer)
+        
         return {
-            "answer": result.answer,
+            "answer": clean_answer,
             "context": result.context,
             "sources": result.sources,
             "metadata": result.metadata

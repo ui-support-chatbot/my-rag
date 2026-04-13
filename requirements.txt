@@ -1,7 +1,7 @@
 # Core Dependencies
 pymilvus[milvus_lite]>=2.4.0
 sentence-transformers
-transformers
+transformers==4.48.0
 torch
 numpy
 pyyaml
