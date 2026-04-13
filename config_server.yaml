@@ -1,0 +1,38 @@
+# Server Configuration for Docker Deployment
+ingestion:
+  chunk_size: 512
+  chunk_overlap: 50
+  chunking_strategy: "fixed"
+  pdf_parser: "docling"
+  html_parser: "trafilatura"
+
+embedding:
+  dense_model: "microsoft/harrier-oss-v1-0.6b"
+  sparse_model: "opensearch-project/opensearch-neural-sparse-encoding-doc-v3-gte"
+  device: "cuda"
+  batch_size: 32
+
+storage:
+  milvus_uri: "http://milvus:19530"
+  collection_name: "documents"
+  db_name: "default"
+  metric_type: "COSINE"
+
+retrieval:
+  k: 15
+  hybrid_weight: 0.5
+  reranker_model: "jinaai/jina-reranker-v3"
+  min_score: 0.0
+
+generation:
+  llm_endpoint: "http://host.docker.internal:11434/v1"
+  model_name: "qwen2.5:7b"
+  max_tokens: 1200
+  temperature: 0.7
+  system_prompt: "Gunakan konteks berikut untuk menjawab pertanyaan. Jika konteks tidak menjawab pertanyaan secara memadai, katakan Anda tidak tahu.\n\nKonteks:\n{context}"
+
+evaluation:
+  metrics: ["faithfulness", "answer_relevancy", "context_precision", "context_recall"]
+  eval_llm: "gpt-4o-mini"
+  eval_embeddings: "all-MiniLM-L6-v2"
+  num_synthetic_qa: 3

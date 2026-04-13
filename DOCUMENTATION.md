@@ -32,13 +32,54 @@ A decoder-only multilingual embedding model (Qwen-based) using last-token poolin
 #### 2. Sparse Strategy: `opensearch-project/opensearch-neural-sparse-encoding-doc-v3-gte`
 An **Asymmetric, Inference-Free** learned sparse retriever.
 - **Ingestion Path**: Uses the **Full Neural Model** (`model.encode_documents`) to expand documents with latent terms and importance weights.
-- **Query Path**: Uses the **Inference-Free Path** (`model.encode_queries`). It utilizes a pre-computed Tokenizer + IDF weight lookup table. This removes the need for a GPU forward pass during search, resulting in near-zero latency for sparse embedding.
+- **Query Path**: Uses the **Inference-Free Path** (`model.encode_queries`). It utilizes a pre-computed Tokenizer + IDF weight lookup table. This removes the need for a GPU forward pass during search, resulting in near-zero latency for sparse
 
-#### 3. Vector Database: `Milvus`
-Stores both dense (768-dim) and sparse (30,522-dim) vectors in a single collection. We use **Reciprocal Rank Fusion (RRF)** to combine the results from both indices.
+## 4. API Deployment (FastAPI)
 
-### C. Reranking
-To combat the "lost in the middle" phenomenon and improve precision, we use a **Listwise Cross-Encoder Reranker**:
+The project includes a FastAPI wrapper (`api.py`) for production deployment.
+
+### Endpoints
+
+| Method | Endpoint | Description |
+|---|---|---|
+| `GET` | `/health` | Connectivity check for Milvus and Ollama. |
+| `POST` | `/query` | Execute a RAG query (Retrieval + Generation). |
+| `POST` | `/ingest` | Trigger background ingestion for a directory. |
+
+### Example Query
+```bash
+curl -X POST http://localhost:8000/query \
+  -H "Content-Type: application/json" \
+  -d '{"query": "Apa itu mekanisme penelaahan usulan?"}'
+```
+
+---
+
+## 5. Docker Deployment (Server)
+
+For server deployment (e.g., 2x GTX 1080), use the provided Docker Compose setup.
+
+### Dual-GPU Implementation
+The `docker-compose.yml` is configured to pass through both GPUs. 
+- **GPU 0**: Optimized for Dense (Harrier) and Sparse (OpenSearch) embeddings.
+- **GPU 1**: Dedicated to the Jina-v3 Reranker.
+
+### Setup Instructions
+1. **Ensure Ollama is running** on the host.
+2. **Build and Start**:
+   ```bash
+   DOCKER_BUILDKIT=0 docker compose build
+   docker compose up -d
+   ```
+3. **Verify Health**:
+   ```bash
+   curl http://localhost:8000/health
+   ```
+
+### Troubleshooting
+- **Security Flags**: The configuration automatically applies `--pids-limit -1` and `--security-opt seccomp=unconfined` to prevent OpenBLAS thread crashes on older Docker version (20.10.x).
+- **Milvus Standalone**: Unlike the local version, the server version uses the 3-container Milvus Standalone stack for higher stability.
+precision, we use a **Listwise Cross-Encoder Reranker**:
 - **Model**: `jinaai/jina-reranker-v3`. A 0.6B parameter multilingual listwise reranker built on Qwen3-0.6B with a novel "last but not late" interaction architecture. It processes up to 64 documents simultaneously within a 131K token context window.
 - **Process**: The retriever fetches a wide candidate pool (Top-50). The reranker then performs a deep pairwise comparison between the query and each candidate, re-sorting them to ensure the most relevant context is prioritized.
 
