@@ -1,4 +1,4 @@
-FROM python:3.11-slim
+FROM python:3.12-slim
 
 # Set environment variables
 ENV PYTHONDONTWRITEBYTECODE 1
@@ -9,15 +9,8 @@ ENV RAG_CONFIG_PATH /app/config_rag.yaml
 
 WORKDIR /app
 
-# Install system dependencies
-# Fix for "Problem executing scripts APT::Update::Post-Invoke" on restrictive seccomp profiles
-RUN rm -f /etc/apt/apt.conf.d/docker-clean && \
-    apt-get update && apt-get install -y --no-install-recommends \
-    build-essential \
-    libgomp1 \
-    libmagic1 \
-    curl \
-    && rm -rf /var/lib/apt/lists/*
+# The research server profile blocks apt-get; skipping system dependencies per SERVER_DEPLOYMENT_GUIDE.md
+# If native libraries like libgomp1 are required, we will address them via specialized base images later.
 
 # Install python dependencies
 COPY requirements.txt .
