@@ -33,7 +33,7 @@ class DenseEmbeddingModel(BaseEmbeddingModel):
             self._model = SentenceTransformer(
                 self.model_name,
                 device=self.device,
-                model_kwargs={"dtype": "auto"},
+                model_kwargs={"dtype": "auto", "trust_remote_code": True},
             )
         return self._model
 
