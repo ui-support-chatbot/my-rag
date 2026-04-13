@@ -10,7 +10,9 @@ ENV RAG_CONFIG_PATH /app/config_rag.yaml
 WORKDIR /app
 
 # Install system dependencies
-RUN apt-get update && apt-get install -y --no-install-recommends \
+# Fix for "Problem executing scripts APT::Update::Post-Invoke" on restrictive seccomp profiles
+RUN rm -f /etc/apt/apt.conf.d/docker-clean && \
+    apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
     libgomp1 \
     libmagic1 \
