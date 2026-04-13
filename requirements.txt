@@ -1,0 +1,22 @@
+# Core Dependencies
+pymilvus[milvus_lite]>=2.4.0
+sentence-transformers
+transformers
+torch
+numpy
+pyyaml
+openai
+
+# Parsing
+docling
+trafilatura
+pymupdf
+beautifulsoup4
+
+# Evaluation
+ragas
+datasets
+pandas
+
+# Utils
+tqdm

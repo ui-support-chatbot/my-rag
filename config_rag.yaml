@@ -1,0 +1,53 @@
+# MyRAG Configuration
+
+# Ingestion settings
+ingestion:
+  chunk_size: 512
+  chunk_overlap: 50
+  chunking_strategy: "fixed"  # or "semantic"
+  pdf_parser: "docling"
+  html_parser: "trafilatura"
+
+# Embedding models
+embedding:
+  dense_model: "microsoft/harrier-oss-v1-0.6b"
+  sparse_model: "opensearch-project/opensearch-neural-sparse-encoding-doc-v3-gte"
+  device: "cuda"
+  batch_size: 32
+
+# Vector storage
+storage:
+  milvus_uri: "./milvus.db"
+  collection_name: "documents"
+  db_name: "default"
+
+# Retrieval settings
+retrieval:
+  k: 50
+  hybrid_weight: 0.5
+  reranker_model: "jinaai/jina-reranker-v3"  # Set to null to disable
+  min_score: 0.0
+
+# LLM generation
+generation:
+  llm_endpoint: "http://localhost:8000/v1"
+  model_name: "llama-3-8b"
+  max_tokens: 512
+  temperature: 0.0
+  system_prompt: |
+    Use the following context to answer the question.
+    If the context doesn't contain enough information, say so.
+
+    Context:
+    {context}
+
+# Evaluation settings
+evaluation:
+  metrics:
+    - faithfulness
+    - answer_relevancy
+    - context_precision
+    - context_recall
+  eval_llm: "gpt-4o-mini"
+  eval_embeddings: "all-MiniLM-L6-v2"
+  num_synthetic_qa: 3
