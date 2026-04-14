@@ -12,7 +12,8 @@ pymilvus[milvus_lite]>=2.4.0,<2.5
 # Embedding Models
 sentence-transformers>=3.0.0
 transformers>=4.51.0,<5.0
-torch
+# torch is installed separately in the Dockerfile with a specific CUDA 11.8 build
+# to ensure GTX 1080 (Pascal, sm_61) compatibility. Do not add torch here.
 numpy
 
 # Parsing

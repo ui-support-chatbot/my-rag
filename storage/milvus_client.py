@@ -33,12 +33,13 @@ class MilvusClient:
         from pymilvus import DataType
 
         schema = self._client.create_schema(auto_id=True, enable_dynamic_field=True)
-        schema.add_field(name="id",              dtype=DataType.INT64,           is_primary=True)
-        schema.add_field(name="doc_id",          dtype=DataType.VARCHAR,         max_length=256)
-        schema.add_field(name="text",            dtype=DataType.VARCHAR,         max_length=65535)
-        schema.add_field(name="chunk_index",     dtype=DataType.INT32)
-        schema.add_field(name="dense_embedding", dtype=DataType.FLOAT_VECTOR,   dim=dimension)
-        schema.add_field(name="sparse_embedding",dtype=DataType.SPARSE_FLOAT_VECTOR)
+        # CollectionSchema.add_field() takes 'field_name' and 'datatype' — NOT 'name'/'dtype'
+        schema.add_field(field_name="id",              datatype=DataType.INT64,             is_primary=True)
+        schema.add_field(field_name="doc_id",          datatype=DataType.VARCHAR,           max_length=256)
+        schema.add_field(field_name="text",            datatype=DataType.VARCHAR,           max_length=65535)
+        schema.add_field(field_name="chunk_index",     datatype=DataType.INT32)
+        schema.add_field(field_name="dense_embedding", datatype=DataType.FLOAT_VECTOR,     dim=dimension)
+        schema.add_field(field_name="sparse_embedding",datatype=DataType.SPARSE_FLOAT_VECTOR)
 
         index_params = self._client.prepare_index_params()
         index_params.add_index(

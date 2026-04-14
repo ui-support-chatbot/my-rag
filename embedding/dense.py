@@ -40,7 +40,11 @@ class DenseEmbeddingModel(BaseEmbeddingModel):
     @property
     def dimension(self) -> int:
         if self._dim is None:
-            self._dim = self.model.get_sentence_embedding_dimension()
+            # get_sentence_embedding_dimension() was renamed in sentence-transformers 3.x
+            if hasattr(self.model, "get_embedding_dimension"):
+                self._dim = self.model.get_embedding_dimension()
+            else:
+                self._dim = self.model.get_sentence_embedding_dimension()
         return self._dim
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:

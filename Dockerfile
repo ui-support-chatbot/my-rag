@@ -20,8 +20,20 @@ ENV RAG_CONFIG_PATH=/app/config_rag.yaml
 
 WORKDIR /app
 
-# Install Python dependencies
-# All packages (including fastapi, uvicorn) are now in requirements.txt
+# ── PyTorch: GTX 1080 (Pascal, sm_61) compatibility ──────────────────────────
+# The GTX 1080 is a Pascal-architecture GPU (compute capability sm_61).
+# PyTorch 2.3+ dropped sm_61 from prebuilt wheels — installing plain `torch`
+# via pip gives the latest version which only supports sm_75+ (Turing and newer),
+# producing: "NVIDIA GeForce GTX 1080 is not compatible with the current PyTorch"
+#
+# Fix: pin to torch==2.2.2 built against CUDA 11.8, which still includes sm_61.
+# This must be installed BEFORE requirements.txt so it is not overridden.
+RUN pip install --no-cache-dir \
+    "torch==2.2.2+cu118" \
+    "torchvision==0.17.2+cu118" \
+    --extra-index-url https://download.pytorch.org/whl/cu118
+
+# Install remaining Python dependencies (torch is already installed above)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
