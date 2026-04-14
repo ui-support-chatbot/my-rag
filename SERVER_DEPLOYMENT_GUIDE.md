@@ -435,6 +435,7 @@ This section documents every production issue encountered on `riset-01` and its 
 | Error | Cause | Fix |
 |-------|-------|-----|
 | `RuntimeError: can't start new thread` during `docker build` | pip's rich progress bar uses threads; Docker 20.10 seccomp blocks `clone()` during builds | `ENV PIP_PROGRESS_BAR=off` in Dockerfile ✅ (already set) |
+| `E: Problem executing scripts APT::Update::Post-Invoke` (exit code 100) | Docker 20.10 seccomp profile blocks syscalls used by apt's post-invoke cleanup scripts during build. `--security-opt` cannot be used during `docker build` on Docker 20.10 (only Docker 23+) | Remove **all** `apt-get` calls from Dockerfile. Modern PyTorch/sentence-transformers pip wheels bundle their own OpenMP runtime — `libgomp1` from the system package is not needed ✅ (already fixed) |
 | `Tokio executor failed: PermissionDenied` | `uv` package manager uses io_uring syscalls, blocked by seccomp during build | Use plain `pip` — never `uv` inside Docker on this server |
 | `cannot stat 'storage': permission denied` during build | Milvus ran as root and created root-owned directories in the build context | Add `storage/` to `.dockerignore` ✅ (already set) |
 
