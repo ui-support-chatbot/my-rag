@@ -154,8 +154,6 @@ cython_debug/
 milvus.db
 milvus.db.lock
 *.log
-data/old/
-data/go-scraper/scraped_data/
 .ruff_cache/
 qdrant_storage/
 docs/
