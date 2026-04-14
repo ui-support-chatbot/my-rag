@@ -22,21 +22,40 @@ async def lifespan(app: FastAPI):
     """Handle startup and shutdown using the modern FastAPI lifespan pattern."""
     global rag_pipeline
     config_path = os.getenv("RAG_CONFIG_PATH", "config_rag.yaml")
-    try:
-        if os.path.exists(config_path):
+
+    # Retry loop — Milvus may still be warming up even after its healthcheck
+    # passes. We retry up to 5 times (50 seconds total) before giving up.
+    max_attempts = 5
+    retry_delay = 10  # seconds
+
+    for attempt in range(1, max_attempts + 1):
+        try:
+            if not os.path.exists(config_path):
+                logger.error(f"Config file not found: {config_path}")
+                break
+
             config = RAGConfig.from_yaml(config_path)
             rag_pipeline = RAGPipeline.from_config(config)
-            logger.info(f"RAG Pipeline initialized from {config_path}")
-        else:
+            logger.info(f"RAG Pipeline initialized from {config_path} (attempt {attempt})")
+            break  # success — exit the retry loop
+
+        except Exception as e:
             logger.warning(
-                f"Config file {config_path} not found. Pipeline not initialized."
+                f"Pipeline init attempt {attempt}/{max_attempts} failed: {e}"
             )
-    except Exception as e:
-        logger.error(f"Failed to initialize RAG Pipeline: {e}", exc_info=True)
+            if attempt < max_attempts:
+                import asyncio
+                logger.info(f"Retrying in {retry_delay}s ...")
+                await asyncio.sleep(retry_delay)
+            else:
+                logger.error(
+                    "Pipeline failed to initialize after all retry attempts. "
+                    "Check Milvus logs: docker compose logs milvus",
+                    exc_info=True,
+                )
 
     yield  # Application runs here
 
-    # Graceful shutdown (add resource cleanup here if needed in future)
     logger.info("RAG API shutting down.")
 
 

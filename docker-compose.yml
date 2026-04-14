@@ -1,16 +1,29 @@
 version: '3.8'
 
 services:
+
+  # ── 1. etcd — Milvus metadata store ──────────────────────────────────────
   etcd:
     container_name: myrag-etcd
     image: quay.io/coreos/etcd:v3.5.0
     environment:
       - ETCD_AUTO_COMPACTION_RETENTION_REASON=periodic
       - ETCD_AUTO_COMPACTION_RETENTION_RUNTIME=1h
-    command: etcd -advertise-client-urls http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
+    command: etcd
+      -advertise-client-urls http://127.0.0.1:2379
+      -listen-client-urls http://0.0.0.0:2379
+      --data-dir /etcd
     volumes:
       - etcd-data:/etcd
+    healthcheck:
+      test: ["CMD", "etcdctl", "endpoint", "health"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    restart: unless-stopped
 
+  # ── 2. MinIO — Milvus object storage ─────────────────────────────────────
   minio:
     container_name: myrag-minio
     image: minio/minio:RELEASE.2023-03-20T20-16-18Z
@@ -22,10 +35,15 @@ services:
       - minio-data:/data
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 30s
-      timeout: 20s
-      retries: 3
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 15s
+    restart: unless-stopped
 
+  # ── 3. Milvus Standalone — vector database ────────────────────────────────
+  # We use Milvus Standalone instead of milvus-lite because milvus-lite's
+  # embedded SQLite engine panics under Docker 20.10's seccomp profile.
   milvus:
     container_name: myrag-milvus
     image: milvusdb/milvus:v2.4.0
@@ -37,22 +55,42 @@ services:
       - milvus-data:/var/lib/milvus
     ports:
       - "19530:19530"
+    # Milvus exposes a health endpoint on port 9091
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      # Milvus takes ~30-60s to fully initialize its internal cluster
+      start_period: 60s
     depends_on:
-      - "etcd"
-      - "minio"
+      etcd:
+        condition: service_healthy
+      minio:
+        condition: service_healthy
+    restart: unless-stopped
 
+  # ── 4. MyRAG API — the main application ──────────────────────────────────
   rag-api:
     container_name: my-rag-api
     build: .
     ports:
       - "8000:8000"
     volumes:
-      - ./data:/app/data
+      # Source documents (read-only)
+      - ./data:/app/data:ro
+      # Use the server config (Milvus URI points to the milvus container)
       - ./config_server.yaml:/app/config_rag.yaml
-      - hf_cache:/root/.cache/huggingface
+      # Cache HuggingFace model weights across restarts (~5-10 GB total)
+      - ./storage/hf_cache:/root/.cache/huggingface
     environment:
       - RAG_CONFIG_PATH=/app/config_rag.yaml
+      # Ollama and OpenAI-compatible endpoints require this var even with a dummy value
       - OPENAI_API_KEY=dummy
+
+    # ── GPU Configuration ──────────────────────────────────────────────────
+    # GPU 0: Dense (Harrier) + Sparse (OpenSearch) embedding models
+    # GPU 1: Jina-v3 Reranker
     deploy:
       resources:
         reservations:
@@ -60,18 +98,31 @@ services:
             - driver: nvidia
               device_ids: ['0', '1']
               capabilities: [gpu]
-    # Critical fixes from server documentation
+
+    # ── Docker 20.10 Security Workarounds ─────────────────────────────────
+    # pids_limit: -1          → removes PID limit so PyTorch/OpenBLAS can spawn threads
+    # seccomp:unconfined      → allows clone() syscall needed for BLAS thread init
+    #   Without these: "OpenBLAS blas_thread_init: pthread_create failed"
     pids_limit: -1
     security_opt:
       - seccomp:unconfined
+
+    # ── Network: reach Ollama running on the host machine ─────────────────
     extra_hosts:
       - "host.docker.internal:host-gateway"
+
+    # KEY FIX: wait for Milvus to be HEALTHY (not just started).
+    # Milvus takes ~60s to boot. Without condition: service_healthy, the API
+    # starts immediately, fails to connect to Milvus, and stays "uninitialized".
     depends_on:
-      - milvus
+      milvus:
+        condition: service_healthy
+
     restart: unless-stopped
 
 volumes:
   etcd-data:
   minio-data:
   milvus-data:
+  # Named volume for hf_cache as fallback (bind mount in ./storage/hf_cache is preferred)
   hf_cache:
