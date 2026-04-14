@@ -30,6 +30,11 @@ class StorageConfig:
 @dataclass
 class RetrievalConfig:
     k: int = 50
+    """Candidate pool size fetched from Milvus before reranking."""
+
+    rerank_top_k: int = 5
+    """Number of documents passed to the LLM after reranking."""
+
     hybrid_weight: float = 0.5
     reranker_model: Optional[str] = "jinaai/jina-reranker-v3"
     min_score: float = 0.0
@@ -41,7 +46,11 @@ class GenerationConfig:
     model_name: str = "llama-3-8b"
     max_tokens: int = 512
     temperature: float = 0.0
-    system_prompt: str = "Use the following context to answer the question. If the context does not contain enough information to answer, say so.\n\nContext:\n{context}"
+    system_prompt: str = (
+        "Use the following context to answer the question. "
+        "If the context does not contain enough information to answer, say so.\n\n"
+        "Context:\n{context}"
+    )
 
 
 @dataclass
@@ -69,11 +78,13 @@ class RAGConfig:
     evaluation: EvaluationConfig = field(default_factory=EvaluationConfig)
 
     @classmethod
-    def from_yaml(cls, path: str):
+    def from_yaml(cls, path: str) -> "RAGConfig":
+        """Load config from a YAML file. Any missing top-level key falls back to defaults."""
         import yaml
 
         with open(path, "r") as f:
-            data = yaml.safe_load(f)
+            data = yaml.safe_load(f) or {}
+
         return cls(
             ingestion=IngestionConfig(**data.get("ingestion", {})),
             embedding=EmbeddingConfig(**data.get("embedding", {})),

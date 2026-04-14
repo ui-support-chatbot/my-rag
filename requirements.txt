@@ -1,11 +1,19 @@
 # Core Dependencies
-pymilvus[milvus_lite]>=2.4.0
-sentence-transformers
-transformers>=4.51.0
+fastapi>=0.100.0
+uvicorn[standard]>=0.23.0
+python-multipart>=0.0.6
+pydantic>=2.0.0
+pyyaml>=6.0
+openai>=1.0.0
+
+# Vector Store
+pymilvus[milvus_lite]>=2.4.0,<2.5
+
+# Embedding Models
+sentence-transformers>=3.0.0
+transformers>=4.51.0,<5.0
 torch
 numpy
-pyyaml
-openai
 
 # Parsing
 docling

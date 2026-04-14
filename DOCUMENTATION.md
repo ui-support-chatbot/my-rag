@@ -1,7 +1,8 @@
 # MyRAG Implementation Documentation
 
 ## 1. Overview
-MyRAG is a modular, research-oriented Retrieval-Augmented Generation (RAG) pipeline. Its primary goal is to provide a transparent, debuggable, and extensible system for transforming unstructured documents (PDFs, HTML) into a high-precision QA system. 
+
+MyRAG is a modular, research-oriented Retrieval-Augmented Generation (RAG) pipeline. Its primary goal is to provide a transparent, debuggable, and extensible system for transforming unstructured documents (PDFs, HTML) into a high-precision QA system.
 
 Unlike "black-box" RAG frameworks, MyRAG prioritizes **explainability**, allowing researchers to trace exactly which chunks were retrieved and why, and evaluate the quality of each stage using industry-standard metrics.
 
@@ -10,94 +11,77 @@ Unlike "black-box" RAG frameworks, MyRAG prioritizes **explainability**, allowin
 ## 2. Technical Stack
 
 ### A. Document Parsing & Chunking
+
 To ensure high-quality text extraction and structural preservation, we use a sophisticated ingestion strategy:
-- **Parsing**: 
+
+- **Parsing**:
   - **PDF**: `Docling` (by IBM). It uses AI-powered layout analysis to recognize tables, formulas, and reading orders, exporting them to structured Markdown.
-  - **HTML**: `Trafilatura`. It removes "boiler-plate" (headers, footers, ads) and extracts the main content.
-- **Chunking**: 
+  - **HTML**: `Trafilatura`. It removes "boilerplate" (headers, footers, ads) and extracts the main content.
+- **Chunking**:
   - We use `docling.chunking.HybridChunker` with `merge_peers=True` and `repeat_table_header=True`.
   - This applies token-aware refinements on top of document structure, ensuring chunks fit the embedding model's token limits.
   - Each chunk is **contextualized** (prepended with its heading hierarchy), providing critical context for retrieval.
-  - `ChunkRecord`s include a **breadcrumb** (e.g., "Introduction > Methods > Data Collection") and exact **page numbers**.
+  - `ChunkRecord`s include a **breadcrumb** (e.g., `"Introduction > Methods > Data Collection"`) and exact **page numbers**.
   - Tables are preserved as Markdown and headers are repeated across split table chunks to maintain structural integrity.
 
 ### B. Embedding & Vector Storage
-We implement a **Hybrid Retrieval** strategy using a state-of-the-art **Dual Routing** architecture to maximize both accuracy and speed:
+
+We implement a **Hybrid Retrieval** strategy using a **Dual-Routing** architecture to maximize both accuracy and speed.
 
 #### 1. Dense Strategy: `microsoft/harrier-oss-v1-0.6b`
+
 A decoder-only multilingual embedding model (Qwen-based) using last-token pooling.
-- **Ingestion Path**: Documents are embedded plainly using `embed_documents()`.
-- **Query Path**: Queries use `embed_query()` which automatically applies the `web_search_query` instruction prompt. This alignment is critical as the model was trained to identify relevant passages specifically when prompted with a task instruction.
+
+- **Ingestion Path**: Documents are embedded plainly using `embed_documents()` — no instruction prompt.
+- **Query Path**: Queries use `embed_query()` which automatically applies the `web_search_query` instruction prompt. This alignment is critical: the model was trained to identify relevant passages specifically when prompted with a task instruction.
 
 #### 2. Sparse Strategy: `opensearch-project/opensearch-neural-sparse-encoding-doc-v3-gte`
+
 An **Asymmetric, Inference-Free** learned sparse retriever.
+
 - **Ingestion Path**: Uses the **Full Neural Model** (`model.encode_documents`) to expand documents with latent terms and importance weights.
-- **Query Path**: Uses the **Inference-Free Path** (`model.encode_queries`). It utilizes a pre-computed Tokenizer + IDF weight lookup table. This removes the need for a GPU forward pass during search, resulting in near-zero latency for sparse
+- **Query Path**: Uses the **Inference-Free Path** (`model.encode_queries`). It utilizes a pre-computed Tokenizer + IDF weight lookup table. This removes the need for a GPU forward pass during search, resulting in near-zero query latency for sparse retrieval.
 
-## 4. API Deployment (FastAPI)
+### C. Retrieval Fusion: Reciprocal Rank Fusion (RRF)
 
-The project includes a FastAPI wrapper (`api.py`) for production deployment.
+After both searches return their top-k candidates, we fuse them using **Custom RRF**:
 
-### Endpoints
-
-| Method | Endpoint | Description |
-|---|---|---|
-| `GET` | `/health` | Connectivity check for Milvus and Ollama. |
-| `POST` | `/query` | Execute a RAG query (Retrieval + Generation). |
-| `POST` | `/ingest` | Trigger background ingestion for a directory. |
-
-### Example Query
-```bash
-curl -X POST http://localhost:8000/query \
-  -H "Content-Type: application/json" \
-  -d '{"query": "Apa itu mekanisme penelaahan usulan?"}'
+```
+score(d) = Σ  1 / (k + rank_i)
 ```
 
----
+- `k = 60` (the standard constant from the original RRF paper).
+- Dense and sparse rank lists are merged — documents appearing in both lists get a higher combined score.
+- The result is a single sorted candidate pool (typically top-50) passed to the reranker.
 
-## 5. Docker Deployment (Server)
+### D. Reranking
 
-For server deployment (e.g., 2x GTX 1080), use the provided Docker Compose setup.
+For late-stage precision, we use a **Listwise Cross-Encoder Reranker**:
 
-### Dual-GPU Implementation
-The `docker-compose.yml` is configured to pass through both GPUs. 
-- **GPU 0**: Optimized for Dense (Harrier) and Sparse (OpenSearch) embeddings.
-- **GPU 1**: Dedicated to the Jina-v3 Reranker.
+- **Model**: `jinaai/jina-reranker-v3`. A 0.6B parameter multilingual listwise reranker built on Qwen3-0.6B with a "last but not late" interaction architecture. It processes up to 64 documents simultaneously within a 131K token context window.
+- **Process**: The retriever fetches a wide candidate pool (Top-50). The reranker performs a deep pairwise comparison between the query and each candidate, re-sorting them by semantic relevance.
+- **Top-K Slicing**: After reranking, only the top `rerank_top_k` documents (default: 5) are passed to the LLM. This prevents token-window overflow while ensuring the LLM receives the highest-quality context.
 
-### Setup Instructions
-1. **Ensure Ollama is running** on the host.
-2. **Build and Start**:
-   ```bash
-   DOCKER_BUILDKIT=0 docker compose build
-   docker compose up -d
-   ```
-3. **Verify Health**:
-   ```bash
-   curl http://localhost:8000/health
-   ```
+### E. Generation
 
-### Troubleshooting
-- **Security Flags**: The configuration automatically applies `--pids-limit -1` and `--security-opt seccomp=unconfined` to prevent OpenBLAS thread crashes on older Docker version (20.10.x).
-- **Milvus Standalone**: Unlike the local version, the server version uses the 3-container Milvus Standalone stack for higher stability.
-precision, we use a **Listwise Cross-Encoder Reranker**:
-- **Model**: `jinaai/jina-reranker-v3`. A 0.6B parameter multilingual listwise reranker built on Qwen3-0.6B with a novel "last but not late" interaction architecture. It processes up to 64 documents simultaneously within a 131K token context window.
-- **Process**: The retriever fetches a wide candidate pool (Top-50). The reranker then performs a deep pairwise comparison between the query and each candidate, re-sorting them to ensure the most relevant context is prioritized.
-
-### D. Generation
-- **LLM**: Local models served via **vLLM** (accessed via an OpenAI-compatible API).
-- **Grounding & Attribution**: 
+- **LLM**: Local models served via **vLLM** or **Ollama** (accessed via OpenAI-compatible API).
+- **Grounding & Attribution**:
   - The system uses a strict system prompt that forces the LLM to rely ONLY on the provided context.
   - Each chunk is prepended with its breadcrumb: `Source [Breadcrumb]: Text`.
   - The system returns an explicit list of sources (breadcrumb, filename, page) used in the answer.
+  - `<think>...</think>` tags from reasoning models (e.g., Qwen, DeepSeek) are automatically stripped.
 
-### E. Evaluation & Observability
+### F. Evaluation & Observability
+
 - **Framework**: `RAGAS`.
 - **Metrics**: Faithfulness, Answer Relevance, Context Precision, and Context Recall.
-- **Failure Categorization**: The evaluator now automatically categorizes failures into:
+- **Failure Categorization**: The evaluator automatically categorizes failures into:
   - **Retrieval Failure**: Relevant info was not in the top-50.
-  - **Reranking Failure**: Relevant info was in top-50 but ranked too low for the LLM.
-  - **Generation Failure**: Correct context was present, but the LLM failed to answer.
+  - **Reranking Failure**: Relevant info was in top-50 but ranked too low.
+  - **Generation Failure**: Correct context was present, but the LLM failed to use it.
 - **Synthetic QA**: A module that uses the LLM to generate "Ground Truth" Q&A pairs from your documents.
+
+---
 
 ## 3. The Dual-Routing Map
 
@@ -110,8 +94,8 @@ graph TD
         S_Ingest["OpenSearch-v3 (Full Neural)"]
         Storage[("Milvus Database")]
 
-        Chunks -->|embed_documents<br/>No Prompt| D_Ingest
-        Chunks -->|embed_documents<br/>Deep Expansion| S_Ingest
+        Chunks -->|"embed_documents<br/>No Prompt"| D_Ingest
+        Chunks -->|"embed_documents<br/>Deep Expansion"| S_Ingest
         D_Ingest --> Milvus_D["Dense Collection"]
         S_Ingest --> Milvus_S["Sparse Collection"]
         Milvus_D --> Storage
@@ -123,21 +107,23 @@ graph TD
         UserQ["User Query"]
         D_Query["Harrier-0.6B + Prompt"]
         S_Query["OpenSearch-v3 (IDF-Only)"]
-        Search["Hybrid Search & RRF"]
+        Search["Hybrid Search & RRF (k=60)"]
 
-        UserQ -->|'web_search_query'| D_Query
-        UserQ -->|Flash Inference-Free| S_Query
+        UserQ -->|"'web_search_query'"| D_Query
+        UserQ -->|"Inference-Free IDF"| S_Query
         D_Query --> Search
         S_Query --> Search
     end
 
-    %% Reranking Logic
-    subgraph Rerank ["3. REFINEMENT (Late Interaction)"]
+    %% Reranking & Generation
+    subgraph Rerank ["3. REFINEMENT & GENERATION"]
         CE["Jina-Reranker-v3"]
+        Slice["Top-K Slice (rerank_top_k=5)"]
         LLM["Grounded Answer"]
 
-        Search -->|Top-50 Fusion| CE
-        CE -->|Listwise Rerank| LLM
+        Search -->|"Top-50 Fusion"| CE
+        CE -->|"Listwise Rerank"| Slice
+        Slice -->|"Top-5 Context"| LLM
     end
 
     style Ingestion fill:#f9f9ff,stroke:#666,stroke-width:2px
@@ -150,58 +136,110 @@ graph TD
 ## 4. Pipeline Data Flow
 
 ### Ingestion Flow
-`Raw Files` $\rightarrow$ `Docling/Trafilatura Parsing` $\rightarrow$ `Hybrid Chunking` $\rightarrow$ `Dense & Sparse Embedding` $\rightarrow$ `Milvus Storage (with Breadcrumbs & Page Nos)`
+`Raw Files` → `Docling/Trafilatura Parsing` → `Hybrid Chunking` → `Batch Dense & Sparse Embedding` → `Milvus Storage (with Breadcrumbs & Page Nos)`
 
 ### Query Flow
-`User Query` $\rightarrow$ `Dual Embedding` $\rightarrow$ `Milvus Hybrid Search` $\rightarrow$ `Metadata Filtering (Optional)` $\rightarrow$ `Reciprocal Rank Fusion (RRF, k=60)` $\rightarrow$ `Top-50 Candidates` $\rightarrow$ `Jina Reranking` $\rightarrow$ `Top-5 Context` $\rightarrow$ `Grounded Generation` $\rightarrow$ `Answer + Sources`
+`User Query` → `Dual Embedding` → `Milvus Hybrid Search` → `Metadata Filtering (Optional)` → `RRF (k=60)` → `Top-50 Candidates` → `Jina Reranking` → `Top-5 Context` → `Grounded Generation` → `Answer + Sources`
 
 ---
 
-## 4. Pipeline Capabilities & Usage
+## 5. Configuration Reference
 
-### 4.1 Ingesting Data
-**What it does**: Processes files/directories and indexes them.
-**How to do it**:
-```bash
-python src/my_rag/cli.py ingest --config config_rag.yaml --directory ./my_docs
+All configuration is driven by `config_rag.yaml` (local) or `config_server.yaml` (Docker server).
+
+### Key Parameters
+
+| Section | Parameter | Default | Description |
+|---|---|---|---|
+| `ingestion` | `chunk_size` | `512` | Max tokens per chunk (Harrier tokenizer) |
+| `ingestion` | `pdf_parser` | `docling` | Parser for PDF files |
+| `embedding` | `dense_model` | `microsoft/harrier-oss-v1-0.6b` | Dense embedding model |
+| `embedding` | `sparse_model` | `opensearch-project/opensearch-neural-sparse-encoding-doc-v3-gte` | Sparse model |
+| `embedding` | `batch_size` | `32` | Chunks per embedding forward pass |
+| `retrieval` | `k` | `50` | Candidate pool size fetched from Milvus |
+| `retrieval` | `rerank_top_k` | `5` | Docs passed to the LLM after reranking |
+| `retrieval` | `reranker_model` | `jinaai/jina-reranker-v3` | Reranker model (set to `null` to disable) |
+| `generation` | `llm_endpoint` | `http://localhost:8000/v1` | OpenAI-compatible LLM endpoint |
+| `generation` | `model_name` | `llama-3-8b` | Model served by vLLM/Ollama |
+
+---
+
+## 6. API Reference
+
+The service exposes a FastAPI application on port `8000`.
+
+### `GET /health`
+Verifies pipeline and vector database connectivity.
+```json
+{"status": "healthy", "milvus": "connected"}
 ```
 
-### 4.2 Standard QA
-**What it does**: Retrieves context and generates an answer.
-**How to do it**:
-```bash
-python src/my_rag/cli.py query --config config_rag.yaml --query "What is the result of the study?"
+### `GET /collections`
+Lists all indexed collections in the vector store. Useful for debugging.
+```json
+{"collections": ["documents"]}
 ```
 
-### 4.3 Document-Specific Search
-**What it does**: Restricts the search to only one or a few specific documents.
-**How to do it**:
+### `POST /query`
+The primary endpoint for retrieving context and generating answers.
+- **Request Body**:
+  ```json
+  {
+    "query": "Apa itu mekanisme penelaahan usulan pembukaan program studi?",
+    "metadata_filter": {"doc_id": "sk_rektor_001"},
+    "config_override": {}
+  }
+  ```
+- **Response**: Returns the answer, combined context, and an array of source documents with breadcrumbs, filenames, and page numbers.
+
+### `POST /ingest`
+Triggers a background ingestion process for a directory.
+- **Request Body**:
+  ```json
+  {"directory_path": "/app/data"}
+  ```
+- **Response**: `{"status": "ingestion_started", "directory": "/app/data"}`
+- **Monitoring**: `docker compose logs -f rag-api`
+
+### Interactive Docs
+Visit `http://<SERVER_IP>:8000/docs` for the full Swagger UI.
+
+---
+
+## 7. CLI Usage
+
+### 7.1 Ingesting Data
 ```bash
-python src/my_rag/cli.py query --config config_rag.yaml --query "..." --doc-ids doc_001 doc_005
+python cli.py ingest --config config_rag.yaml --directory ./my_docs
 ```
 
-### 4.4 Keyword Debugging (The "Tracing" Feature)
-**What it does**: Verifies if a specific keyword exists in the database and identifies which chunks contain it.
-**How to do it**:
+### 7.2 Standard QA
+```bash
+python cli.py query --config config_rag.yaml --query "What is the result of the study?"
+```
+
+### 7.3 Document-Specific Search
+```bash
+python cli.py query --config config_rag.yaml --query "..." --doc-ids doc_001 doc_005
+```
+
+### 7.4 Keyword Debugging
 ```bash
 # Find all chunks containing a word
-python src/my_rag/cli.py find-keyword --config config_rag.yaml --keyword "neural network"
+python cli.py find-keyword --config config_rag.yaml --keyword "neural network"
 
-# Trace if a specific query's results actually contained a required keyword
-python src/my_rag/cli.py trace --config config_rag.yaml --query "..." --check-keyword "activation"
+# Trace if a specific query's results contained a required keyword
+python cli.py trace --config config_rag.yaml --query "..." --check-keyword "activation"
 ```
 
-### 4.5 Evaluation
-**What it does**: Measures the system's performance using RAGAS and categorizes failures.
-**How to do it**:
+### 7.5 Evaluation
 ```bash
-# Generate synthetic QA and evaluate them
-python src/my_rag/cli.py eval --config config_rag.yaml --synthetic --paths ./data/doc.pdf
+python cli.py eval --config config_rag.yaml --synthetic --paths ./data/doc.pdf
 ```
 
 ---
 
-## 5. Extensibility Guide
+## 8. Extensibility Guide
 
 ### Adding a New Parser
 1. Create a class inheriting from `BaseParser` in `ingestion/`.
@@ -210,9 +248,8 @@ python src/my_rag/cli.py eval --config config_rag.yaml --synthetic --paths ./dat
 
 ### Changing the Embedding Model
 1. Update `embedding.dense_model` or `embedding.sparse_model` in `config_rag.yaml`.
-2. Re-run the `ingest` command to update the Milvus index.
+2. Re-run the `ingest` command to rebuild the Milvus index.
 
 ### Adding New Evaluation Metrics
 1. Add the metric class from `ragas.metrics` to the `metric_map` in `evaluation/evaluator.py`.
 2. Add the metric name to the `metrics` list in `config_rag.yaml`.
-
