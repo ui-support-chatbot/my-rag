@@ -20,6 +20,14 @@ ENV RAG_CONFIG_PATH=/app/config_rag.yaml
 
 WORKDIR /app
 
+# ── Fix for pkg_resources issue ────────────────────────────────────────────────
+# Install setuptools first to ensure pkg_resources is available before other packages
+RUN pip install --upgrade pip && \
+    pip install --no-cache-dir setuptools>=68.0
+
+# ── Diagnostic: Verify pkg_resources availability ──────────────────────────────
+RUN python -c "import pkg_resources; print('pkg_resources version:', pkg_resources.__version__)" || echo "pkg_resources not available"
+
 # ── PyTorch: GTX 1080 (Pascal, sm_61) compatibility ──────────────────────────
 # The GTX 1080 is a Pascal-architecture GPU (compute capability sm_61).
 # PyTorch 2.3+ dropped sm_61 from prebuilt wheels — installing plain `torch`
@@ -33,7 +41,7 @@ RUN pip install --no-cache-dir \
     "torchvision==0.17.2+cu118" \
     --extra-index-url https://download.pytorch.org/whl/cu118
 
-# Install remaining Python dependencies (torch is already installed above)
+# Install remaining Python dependencies (torch and setuptools are already installed above)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
