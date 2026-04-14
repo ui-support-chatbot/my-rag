@@ -5,6 +5,9 @@ python-multipart>=0.0.6
 pydantic>=2.0.0
 pyyaml>=6.0
 openai>=1.0.0
+# setuptools provides pkg_resources, which pymilvus imports at startup.
+# Python 3.12-slim no longer ships setuptools by default.
+setuptools>=68.0
 
 # Vector Store
 pymilvus[milvus_lite]>=2.4.0,<2.5
@@ -14,7 +17,9 @@ sentence-transformers>=3.0.0
 transformers>=4.51.0,<5.0
 # torch is installed separately in the Dockerfile with a specific CUDA 11.8 build
 # to ensure GTX 1080 (Pascal, sm_61) compatibility. Do not add torch here.
-numpy
+# numpy 2.x breaks the C ABI used by torch 2.2.2 (_ARRAY_API not found).
+# Pin to 1.x to maintain compatibility.
+numpy>=1.24.0,<2.0
 
 # Parsing
 docling
