@@ -1,4 +1,4 @@
-FROM python:3.12
+FROM python:3.12-slim
 
 # ── Build-time env vars ────────────────────────────────────────────────────────
 # PIP_PROGRESS_BAR and PIP_NO_COLOR are REQUIRED on Docker 20.10.x servers.
