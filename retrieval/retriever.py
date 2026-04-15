@@ -148,7 +148,7 @@ class Retriever:
         filter_expr = self._build_filter(doc_ids, metadata_filter)
 
         output_fields = ["text", "doc_id", "chunk_index", "source", "breadcrumb", "page_number"]
-        search_kwargs = dict(limit=candidate_k, expr=filter_expr, output_fields=output_fields)
+        search_kwargs = dict(limit=candidate_k, filter=filter_expr, output_fields=output_fields)
 
         # ── Dense search ──────────────────────────────────────────────────────
         dense_results = self.milvus.client.search(
