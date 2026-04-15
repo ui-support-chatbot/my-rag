@@ -5,13 +5,11 @@ python-multipart>=0.0.6
 pydantic>=2.0.0
 pyyaml>=6.0
 openai>=1.0.0
-# setuptools provides pkg_resources, which pymilvus imports at startup.
-# Python 3.12-slim no longer ships setuptools by default.
-# setuptools 70.0.0 removed pkg_resources, so we pin it below 70.0.0.
-setuptools>=68.0,<70.0.0
+# setuptools is no longer required because PyMilvus 2.5.x removed the legacy
+# pkg_resources dependence!
 
 # Vector Store
-pymilvus[milvus_lite]>=2.4.0,<2.5
+pymilvus[milvus_lite]>=2.5.0
 
 # Embedding Models
 sentence-transformers>=3.0.0

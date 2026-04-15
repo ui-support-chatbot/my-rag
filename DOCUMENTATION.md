@@ -253,3 +253,19 @@ python cli.py eval --config config_rag.yaml --synthetic --paths ./data/doc.pdf
 ### Adding New Evaluation Metrics
 1. Add the metric class from `ragas.metrics` to the `metric_map` in `evaluation/evaluator.py`.
 2. Add the metric name to the `metrics` list in `config_rag.yaml`.
+
+---
+
+## 9. Future Roadmap & Planned Features
+
+### Semantic FAQ Router (Intent Routing / Guardrails)
+To improve performance, reduce LLM costs, and ensure 100% accuracy for strictly administrative queries (e.g., "lost ID card", "leave of absence steps"), an **Intent Router** is planned to bypass the LLM entirely for high-confidence queries.
+
+#### Architecture Proposal:
+1. **FAQ Vector Collection**: A new `faq_collection` in Milvus storing anticipated questions (embedded using `Harrier`) alongside their verified, hardcoded markdown answers in metadata.
+2. **Pre-Retrieval Interception**:
+   - The user's query is embedded.
+   - We perform a cosine similarity search against `faq_collection`.
+   - **Threshold Match (> 0.90)**: The semantic router SHORT-CIRCUITS the pipeline. The verified answer is returned instantly (~0.1s latency). No chunks are fetched, Jina is not invoked, and the generation LLM is completely bypassed.
+   - **Fallback (< 0.90)**: The query proceeds through the normal Dual-Routing architecture (Dense + Sparse → RRF → Reranker → LLM).
+3. **Automated Bootstrapping**: Utilizing the existing `SyntheticQAGenerator` module to crawl regulatory PDFs, generate anticipated Q&A pairs, and stage them for human review before insertion into the `faq_collection`.

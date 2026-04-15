@@ -21,12 +21,9 @@ ENV RAG_CONFIG_PATH=/app/config_rag.yaml
 WORKDIR /app
 
 # ── Fix for pkg_resources issue ────────────────────────────────────────────────
-# Install setuptools<70.0.0 to ensure pkg_resources is available (removed in 70.0.0)
-RUN pip install --upgrade pip && \
-    pip install --no-cache-dir "setuptools<70.0.0"
-
-# ── Diagnostic: Verify pkg_resources availability ──────────────────────────────
-RUN python -c "import pkg_resources; print('pkg_resources available, version:', pkg_resources.__version__)" || echo "pkg_resources still not available"
+# (REMOVED) PyMilvus 2.5+ no longer requires pkg_resources, so the setuptools
+# workaround and diagnostic check is no longer needed.
+RUN pip install --upgrade pip
 
 # ── PyTorch: GTX 1080 (Pascal, sm_61) compatibility ──────────────────────────
 # The GTX 1080 is a Pascal-architecture GPU (compute capability sm_61).
