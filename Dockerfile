@@ -21,12 +21,13 @@ ENV RAG_CONFIG_PATH=/app/config_rag.yaml
 WORKDIR /app
 
 # ── Fix for pkg_resources issue ────────────────────────────────────────────────
-# Install setuptools first to ensure pkg_resources is available before other packages
+# Install setuptools and ensure pkg_resources is available before other packages
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir setuptools>=68.0
+    pip install --no-cache-dir setuptools && \
+    pip install --no-cache-dir pkg_resources
 
 # ── Diagnostic: Verify pkg_resources availability ──────────────────────────────
-RUN python -c "import pkg_resources; print('pkg_resources version:', pkg_resources.__version__)" || echo "pkg_resources not available"
+RUN python -c "import pkg_resources; print('pkg_resources available, version:', pkg_resources.__version__)" || echo "pkg_resources still not available"
 
 # ── PyTorch: GTX 1080 (Pascal, sm_61) compatibility ──────────────────────────
 # The GTX 1080 is a Pascal-architecture GPU (compute capability sm_61).
