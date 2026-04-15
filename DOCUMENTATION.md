@@ -201,9 +201,47 @@ Triggers a background ingestion process for a directory.
 - **Response**: `{"status": "ingestion_started", "directory": "/app/data"}`
 - **Monitoring**: `docker compose logs -f rag-api`
 
+
 ### Interactive Docs
 Visit `http://<SERVER_IP>:8000/docs` for the full Swagger UI.
 
+### Debug Endpoints
+The system includes several debugging endpoints to inspect the pipeline at different stages:
+
+**`POST /debug/chunks`** - View chunks after chunking but before embedding
+- Request body: `{"directory_path": "/app/data", "save_to_file": true, "output_format": "json"}`
+- Response: Array of chunk objects with detailed metadata (text, doc_id, breadcrumb, page_number, etc.)
+
+**`POST /debug/retrieve`** - View retrieval results after RRF fusion but before reranking
+- Request body: `{"query": "your query", "k": 20, "metadata_filter": {}}`
+- Response: Retrieved documents with RRF scores
+
+**`POST /debug/rerank`** - View reranking results after Jina reranking but before LLM generation
+- Request body: `{"query": "your query", "k": 20, "rerank_top_k": 5}`
+- Response: Reranked documents with updated scores
+
+## 7. CLI Usage (Extended)
+
+### 7.7 Debugging Commands
+
+**`python cli.py inspect-chunks`** - Inspect chunks before embedding
+```bash
+python cli.py inspect-chunks --config config_rag.yaml --directory ./data --show-stats
+```
+Options:
+- `--output-file`: Save chunks to a file
+- `--show-stats`: Show chunking statistics
+- `--filter-keyword`: Filter chunks containing specific keyword
+
+**`python cli.py debug-query`** - Debug query with full pipeline inspection
+```bash
+python cli.py debug-query --config config_rag.yaml --query "Your query" --show-stages --output-format detailed
+```
+Options:
+- `--show-stages`: Show results at each pipeline stage
+- `--output-format`: Output format (json, text, detailed)
+
+These commands allow you to inspect the intermediate results of the RAG pipeline without triggering the LLM generation.
 ---
 
 ## 7. CLI Usage
@@ -276,7 +314,16 @@ The following optimizations were implemented to stabilize the pipeline for produ
 - **Problem**: The SPLADE sparse embedding model (`opensearch-v3-gte`) has a 30,522-dimension output. Batch sizes of 32 exceed the 8GB VRAM limit of the GTX 1080 when running dual-models (Harrier + SPLADE).
 - **Fix**: Reduced `embedding.batch_size` to `16` (or `4` for maximum safety). This reduces the activation matrix memory pressure during the SpladePooling stage.
 
-### D. Unified Parsing (The Docling Shift)
+### D. GPU Memory Competition Issue
+- **Problem**: When running the RAG system in Docker with GPU access, the RAG embedding models (Harrier, OpenSearch, Jina-reranker) compete for GPU memory with the LLM backend (Ollama). The nvidia-smi output shows multiple processes consuming GPU memory: Ollama (5.47 GiB) and the RAG Python process (2.55 GiB), leading to CUDA OOM errors.
+- **Solution**:
+  1. **GPU Isolation**: Assign separate GPUs for embedding/reranking vs LLM inference in docker-compose.yml:
+     - GPU 0: Embedding models (Harrier, OpenSearch sparse)
+     - GPU 1: Reranker model (Jina-v3) and LLM
+  2. **Memory Management**: Add explicit torch.cuda.empty_cache() calls after intensive operations
+  3. **Environment Variable**: Set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to reduce memory fragmentation
+
+### E. Unified Parsing (The Docling Shift)
 - **Problem**: Custom parsers (like Trafilatura) return flat strings. The `HybridChunker` requires a rich `DoclingDocument` object to recognize hierarchical headers and tables.
 - **Fix**: Centralized all parsing (PDF, HTML, DOCX) into the `Docling` `DocumentConverter`. This ensures every chunk retains its structural metadata (breadcrumbs) which is vital for the RAG reranking stage.
 

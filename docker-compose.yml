@@ -87,6 +87,8 @@ services:
       - RAG_CONFIG_PATH=/app/config_rag.yaml
       # Ollama and OpenAI-compatible endpoints require this var even with a dummy value
       - OPENAI_API_KEY=dummy
+      # Memory management for PyTorch to avoid fragmentation
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
     # ── GPU Configuration ──────────────────────────────────────────────────
     # GPU 0: Dense (Harrier) + Sparse (OpenSearch) embedding models

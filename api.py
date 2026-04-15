@@ -92,6 +92,79 @@ class RAGResponse(BaseModel):
     metadata: Dict[str, Any]
 
 
+# ── Debug Request / Response schemas ───────────────────────────────────────────
+class DebugChunksRequest(BaseModel):
+    directory_path: str
+    save_to_file: Optional[bool] = False
+    output_format: Optional[str] = "json"  # json or txt
+
+
+class ChunkInfo(BaseModel):
+    id: int
+    doc_id: str
+    chunk_index: int
+    text: str
+    breadcrumb: str
+    page_number: int
+    filename: str
+    char_count: int
+    token_count: Optional[int] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class DebugChunksResponse(BaseModel):
+    chunks: List[ChunkInfo]
+    total_chunks: int
+    processing_time_ms: float
+
+
+class DebugRetrieveRequest(BaseModel):
+    query: str
+    k: Optional[int] = 20
+    metadata_filter: Optional[Dict[str, Any]] = None
+
+
+class RetrievedDocInfo(BaseModel):
+    text: str
+    doc_id: str
+    chunk_index: int
+    rrf_score: float
+    dense_score: Optional[float] = None
+    sparse_score: Optional[float] = None
+    breadcrumb: str
+    page_number: int
+
+
+class DebugRetrieveResponse(BaseModel):
+    query: str
+    retrieved_docs: List[RetrievedDocInfo]
+    total_candidates: int
+    retrieval_time_ms: float
+
+
+class DebugRerankRequest(BaseModel):
+    query: str
+    k: Optional[int] = 20
+    rerank_top_k: Optional[int] = 5
+
+
+class RerankedDocInfo(BaseModel):
+    text: str
+    doc_id: str
+    chunk_index: int
+    rrf_score: float
+    rerank_score: float
+    final_score: float
+    breadcrumb: str
+    page_number: int
+
+
+class DebugRerankResponse(BaseModel):
+    query: str
+    reranked_docs: List[RerankedDocInfo]
+    rerank_time_ms: float
+
+
 # ── Helpers ───────────────────────────────────────────────────────────────────
 def strip_thought_process(text: str) -> str:
     """Remove <think>...</think> blocks emitted by reasoning models (Qwen, DeepSeek)."""
@@ -186,6 +259,184 @@ async def ingest_data(request: IngestRequest, background_tasks: BackgroundTasks)
         "directory": request.directory_path,
         "message": "Check container logs for progress.",
     }
+
+
+@app.post("/debug/chunks", response_model=DebugChunksResponse, summary="Debug: View chunks before embedding")
+async def debug_chunks(request: DebugChunksRequest):
+    """
+    View chunks after chunking but before embedding.
+    Useful for inspecting how documents are being split and processed.
+    """
+    if not rag_pipeline:
+        raise HTTPException(status_code=503, detail="RAG Pipeline not initialized")
+
+    import time
+    start_time = time.time()
+
+    try:
+        # Process the directory to get chunks
+        chunks = rag_pipeline.ingestion.process_directory(request.directory_path)
+
+        # Prepare chunk data for response
+        chunk_data = []
+        for i, chunk in enumerate(chunks):
+            # Estimate token count (rough approximation: 1 token ≈ 4 chars)
+            token_count = len(chunk.text) // 4
+            
+            chunk_info = ChunkInfo(
+                id=i,
+                doc_id=chunk.doc_id,
+                chunk_index=chunk.chunk_index,
+                text=chunk.text,
+                breadcrumb=chunk.breadcrumb,
+                page_number=chunk.page_number,
+                filename=chunk.filename,
+                char_count=len(chunk.text),
+                token_count=token_count,
+                metadata=dict(chunk.metadata) if chunk.metadata else {}
+            )
+            chunk_data.append(chunk_info)
+
+        # Optionally save to file
+        if request.save_to_file:
+            import json
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"chunks_debug_{timestamp}.{request.output_format}"
+            filepath = f"./debug_output/{filename}"
+            
+            # Create debug_output directory if it doesn't exist
+            import os
+            os.makedirs("./debug_output", exist_ok=True)
+            
+            if request.output_format == "json":
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    json.dump([chunk.dict() for chunk in chunk_data], f, indent=2, ensure_ascii=False)
+            else:  # txt format
+                with open(filepath, 'w', encoding='utf-8') as f:
+                    for chunk in chunk_data:
+                        f.write(f"=== CHUNK {chunk.id} ===\n")
+                        f.write(f"Doc ID: {chunk.doc_id}\n")
+                        f.write(f"Breadcrumb: {chunk.breadcrumb}\n")
+                        f.write(f"Page: {chunk.page_number}\n")
+                        f.write(f"Filename: {chunk.filename}\n")
+                        f.write(f"Text: {chunk.text}\n")
+                        f.write("\n" + "="*50 + "\n\n")
+
+        processing_time = (time.time() - start_time) * 1000  # Convert to milliseconds
+
+        return DebugChunksResponse(
+            chunks=chunk_data,
+            total_chunks=len(chunk_data),
+            processing_time_ms=processing_time
+        )
+    except Exception as e:
+        logger.error(f"Debug chunks failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/debug/retrieve", response_model=DebugRetrieveResponse, summary="Debug: View retrieval results before reranking")
+async def debug_retrieve(request: DebugRetrieveRequest):
+    """
+    View retrieval results after RRF fusion but before reranking.
+    Shows how documents are retrieved and scored by the hybrid system.
+    """
+    if not rag_pipeline:
+        raise HTTPException(status_code=503, detail="RAG Pipeline not initialized")
+
+    import time
+    start_time = time.time()
+
+    try:
+        # Perform retrieval only (without reranking)
+        docs = rag_pipeline.retriever.retrieve(
+            query=request.query,
+            collection_name=rag_pipeline.config.storage.collection_name,
+            metadata_filter=request.metadata_filter,
+            k=request.k,
+        )
+
+        # Prepare retrieved docs data for response
+        retrieved_docs = []
+        for doc in docs:
+            # Note: We don't have individual dense/sparse scores here since
+            # the retriever returns the fused RRF results. We'll leave them as None.
+            doc_info = RetrievedDocInfo(
+                text=doc.text,
+                doc_id=doc.doc_id,
+                chunk_index=doc.chunk_index,
+                rrf_score=doc.score,
+                dense_score=None,
+                sparse_score=None,
+                breadcrumb=doc.metadata.get("breadcrumb", ""),
+                page_number=doc.metadata.get("page_number", 0)
+            )
+            retrieved_docs.append(doc_info)
+
+        retrieval_time = (time.time() - start_time) * 1000  # Convert to milliseconds
+
+        return DebugRetrieveResponse(
+            query=request.query,
+            retrieved_docs=retrieved_docs,
+            total_candidates=len(retrieved_docs),
+            retrieval_time_ms=retrieval_time
+        )
+    except Exception as e:
+        logger.error(f"Debug retrieve failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/debug/rerank", response_model=DebugRerankResponse, summary="Debug: View rerank results before LLM")
+async def debug_rerank(request: DebugRerankRequest):
+    """
+    View reranking results after Jina reranking but before LLM generation.
+    Shows how the reranker modifies the order and scores of retrieved documents.
+    """
+    if not rag_pipeline:
+        raise HTTPException(status_code=503, detail="RAG Pipeline not initialized")
+
+    import time
+    start_time = time.time()
+
+    try:
+        # Get the top k documents before reranking
+        docs = rag_pipeline.retriever.retrieve(
+            query=request.query,
+            collection_name=rag_pipeline.config.storage.collection_name,
+            k=request.k,
+        )
+
+        # Apply reranking using the retriever's internal method
+        reranked_docs = rag_pipeline.retriever._rerank(request.query, docs)
+
+        # Take only the top rerank_top_k documents
+        reranked_docs = reranked_docs[:request.rerank_top_k]
+
+        # Prepare reranked docs data for response
+        reranked_docs_info = []
+        for doc in reranked_docs:
+            doc_info = RerankedDocInfo(
+                text=doc.text,
+                doc_id=doc.doc_id,
+                chunk_index=doc.chunk_index,
+                rrf_score=doc.score,  # This is the RRF score before reranking
+                rerank_score=doc.score,  # The score after reranking (this is actually the reranked score)
+                final_score=doc.score,  # Same as rerank_score in this context
+                breadcrumb=doc.metadata.get("breadcrumb", ""),
+                page_number=doc.metadata.get("page_number", 0)
+            )
+            reranked_docs_info.append(doc_info)
+
+        rerank_time = (time.time() - start_time) * 1000  # Convert to milliseconds
+
+        return DebugRerankResponse(
+            query=request.query,
+            reranked_docs=reranked_docs_info,
+            rerank_time_ms=rerank_time
+        )
+    except Exception as e:
+        logger.error(f"Debug rerank failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 if __name__ == "__main__":

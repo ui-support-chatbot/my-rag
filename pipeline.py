@@ -161,6 +161,65 @@ class RAGPipeline:
 
         return len(data)
 
+    def save_chunks_before_embedding(
+        self,
+        paths: List[str] = None,
+        directory: str = None,
+        doc_id_prefix: str = "doc",
+        output_file: str = None
+    ) -> List:
+        """Save chunks to file before embedding for debugging purposes."""
+        chunks = []
+        if paths:
+            for i, path in enumerate(paths):
+                doc_id = f"{doc_id_prefix}_{i:03d}"
+                file_chunks = self.ingestion.process_file(path, doc_id=doc_id)
+                chunks.extend(file_chunks)
+
+        if directory:
+            dir_chunks = self.ingestion.process_directory(directory)
+            chunks.extend(dir_chunks)
+
+        if not chunks:
+            logger.warning("No chunks produced — nothing to save.")
+            return []
+
+        # Save chunks to file if requested
+        if output_file:
+            import json
+            from datetime import datetime
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            filename = f"{output_file}_{timestamp}.json"
+            filepath = f"./debug_output/{filename}"
+            
+            # Create debug_output directory if it doesn't exist
+            import os
+            os.makedirs("./debug_output", exist_ok=True)
+            
+            # Prepare chunk data for saving
+            chunk_data = []
+            for i, chunk in enumerate(chunks):
+                chunk_info = {
+                    "id": i,
+                    "doc_id": chunk.doc_id,
+                    "chunk_index": chunk.chunk_index,
+                    "text": chunk.text,
+                    "breadcrumb": chunk.breadcrumb,
+                    "page_number": chunk.page_number,
+                    "filename": chunk.filename,
+                    "char_count": len(chunk.text),
+                    "token_count": len(chunk.text) // 4,  # Rough estimate
+                    "metadata": dict(chunk.metadata) if chunk.metadata else {}
+                }
+                chunk_data.append(chunk_info)
+            
+            with open(filepath, 'w', encoding='utf-8') as f:
+                json.dump(chunk_data, f, indent=2, ensure_ascii=False)
+            
+            logger.info(f"Saved {len(chunks)} chunks to {filepath}")
+        
+        return chunks
+
     def query(
         self,
         query: str,
