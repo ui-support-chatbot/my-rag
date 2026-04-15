@@ -25,16 +25,15 @@ class IngestionPipeline:
         )
 
     def process_file(self, file_path: str, doc_id: str = None) -> List[ChunkRecord]:
-        ext = os.path.splitext(file_path)[1]
-
-        if PDFParser.accepts_extension(ext):
-            # PDF parser now returns DoclingDocument
-            doc = PDFParser().extract(file_path)
-        elif HTMLParser.accepts_extension(ext):
-            # HTML parser now returns DoclingDocument
-            doc = HTMLParser().extract(file_path)
-        else:
-            raise ValueError(f"Unsupported file type: {ext}")
+        from docling.document_converter import DocumentConverter
+        from pathlib import Path
+        
+        # We now use Docling explicitly for ALL formats (PDF, HTML, etc)
+        # to ensure it returns a proper DoclingDocument with layout geometry
+        # and hierarchy metadata, which HybridChunker strictly requires.
+        converter = DocumentConverter()
+        result = converter.convert(Path(file_path))
+        doc = result.document
 
         if doc_id is None:
             doc_id = os.path.splitext(os.path.basename(file_path))[0]
