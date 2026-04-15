@@ -369,7 +369,7 @@ async def debug_retrieve(request: DebugRetrieveRequest):
                 dense_score=None,
                 sparse_score=None,
                 breadcrumb=doc.metadata.get("breadcrumb", ""),
-                page_number=doc.metadata.get("page_number", 0)
+                page_number=doc.metadata.get("page_number") or 0
             )
             retrieved_docs.append(doc_info)
 
@@ -423,7 +423,7 @@ async def debug_rerank(request: DebugRerankRequest):
                 rerank_score=doc.score,  # The score after reranking (this is actually the reranked score)
                 final_score=doc.score,  # Same as rerank_score in this context
                 breadcrumb=doc.metadata.get("breadcrumb", ""),
-                page_number=doc.metadata.get("page_number", 0)
+                page_number=doc.metadata.get("page_number") or 0
             )
             reranked_docs_info.append(doc_info)
 

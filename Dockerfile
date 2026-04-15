@@ -38,6 +38,13 @@ RUN pip install --no-cache-dir \
     "torchvision==0.17.2+cu118" \
     --extra-index-url https://download.pytorch.org/whl/cu118
 
+# Install OCR dependencies for document processing
+RUN apt-get update && apt-get install -y \
+    tesseract-ocr \
+    libtesseract-dev \
+    libleptonica-dev \
+    && rm -rf /var/lib/apt/lists/*
+
 # Install remaining Python dependencies (torch and setuptools are already installed above)
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
