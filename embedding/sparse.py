@@ -76,8 +76,8 @@ class SparseEmbeddingModel(BaseEmbeddingModel):
 
     def embed_query(self, text: str) -> Dict[int, float]:
         """Encode a query using the IDF table only (no model forward pass)."""
-        embedding = self.model.encode_queries(text)
-        # encode_queries may return a single tensor or a list
+        embedding = self.model.encode_query(text)
+        # encode_query may return a single tensor or a list
         if isinstance(embedding, (list, tuple)):
             embedding = embedding[0]
         return self._tensor_to_dict(embedding)

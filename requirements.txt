@@ -23,6 +23,7 @@ numpy>=1.24.0,<2.0
 # Parsing
 docling
 rapidocr-onnxruntime
+easyocr
 trafilatura
 pymupdf
 beautifulsoup4
