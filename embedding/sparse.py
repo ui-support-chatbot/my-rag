@@ -68,7 +68,7 @@ class SparseEmbeddingModel(BaseEmbeddingModel):
 
     def embed_documents(self, texts: List[str]) -> List[Dict[int, float]]:
         """Encode documents using the full neural model."""
-        embeddings = self.model.encode_documents(texts)
+        embeddings = self.model.encode_document(texts)
         if not isinstance(embeddings, (list, tuple)):
             # Batch tensor — split per sample
             embeddings = [embeddings[i] for i in range(len(texts))]
