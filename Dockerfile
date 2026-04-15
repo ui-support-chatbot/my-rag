@@ -39,7 +39,7 @@ RUN pip install --no-cache-dir \
     --extra-index-url https://download.pytorch.org/whl/cu118
 
 # Install OCR dependencies for document processing
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y --no-install-recommends \
     tesseract-ocr \
     libtesseract-dev \
     libleptonica-dev \
