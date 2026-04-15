@@ -15,8 +15,8 @@ Unlike "black-box" RAG frameworks, MyRAG prioritizes **explainability**, allowin
 To ensure high-quality text extraction and structural preservation, we use a sophisticated ingestion strategy:
 
 - **Parsing**:
-  - **PDF**: `Docling` (by IBM). It uses AI-powered layout analysis to recognize tables, formulas, and reading orders, exporting them to structured Markdown.
-  - **HTML**: `Trafilatura`. It removes "boilerplate" (headers, footers, ads) and extracts the main content.
+  - **All Formats (PDF, HTML, etc.)**: `Docling` (by IBM). Docling is used exclusively across all ingestion formats because it natively identifies layout structures (tables, headers, formulas) and outputs a strictly typed `DoclingDocument`. 
+  - *Note on Trafilatura*: We previously used `Trafilatura` for HTML boilerplate removal. However, because our advanced `HybridChunker` specifically requires the hierarchical node metadata inside a `DoclingDocument` to function correctly, we deprecated custom flat-text parsers. Docling handles HTML natively while preserving the required structural geometry.
 - **Chunking**:
   - We use `docling.chunking.HybridChunker` with `merge_peers=True` and `repeat_table_header=True`.
   - This applies token-aware refinements on top of document structure, ensuring chunks fit the embedding model's token limits.

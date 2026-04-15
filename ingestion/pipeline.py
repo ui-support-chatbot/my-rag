@@ -25,30 +25,12 @@ class IngestionPipeline:
         )
 
     def process_file(self, file_path: str, doc_id: str = None) -> List[ChunkRecord]:
-        from docling.document_converter import DocumentConverter, PdfFormatOption
-        from docling.datamodel.pipeline_options import PdfPipelineOptions, EasyOcrOptions
-        from docling.datamodel.base_models import InputFormat
+        from docling.document_converter import DocumentConverter
         from pathlib import Path
         
-        # Diagnostic: Force import easyocr to catch the hidden Linux ImportError
-        try:
-            import easyocr
-            logger.info("Diagnostic: easyocr imported successfully on the host!")
-        except Exception as e:
-            logger.error(f"Diagnostic FATAL easyocr import crash: {repr(e)}")
-            import traceback
-            logger.error(traceback.format_exc())
-
-        # Explicitly configure Docling to use EasyOCR so the Auto detector stops swallowing errors
-        pipeline_options = PdfPipelineOptions()
-        pipeline_options.do_ocr = True
-        pipeline_options.ocr_options = EasyOcrOptions()
-
-        converter = DocumentConverter(
-            format_options={
-                InputFormat.PDF: PdfFormatOption(pipeline_options=pipeline_options)
-            }
-        )
+        # We use Docling explicitly for ALL formats (PDF, HTML, etc)
+        # to ensure it returns a proper DoclingDocument with layout geometry.
+        converter = DocumentConverter()
         result = converter.convert(Path(file_path))
         doc = result.document
 
