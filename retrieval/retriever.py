@@ -155,7 +155,7 @@ class Retriever:
             collection_name=collection_name,
             data=[dense_emb],
             anns_field="dense_embedding",
-            param={"metric_type": "COSINE", "params": {"nprobe": 10}},
+            search_params={"metric_type": "COSINE", "params": {"nprobe": 10}},
             **search_kwargs,
         )[0]
 
@@ -164,7 +164,7 @@ class Retriever:
             collection_name=collection_name,
             data=[sparse_emb],
             anns_field="sparse_embedding",
-            param={"metric_type": "IP", "params": {"nprobe": 10}},
+            search_params={"metric_type": "IP", "params": {"nprobe": 10}},
             **search_kwargs,
         )[0]
 
