@@ -21,10 +21,9 @@ ENV RAG_CONFIG_PATH=/app/config_rag.yaml
 WORKDIR /app
 
 # ── Fix for pkg_resources issue ────────────────────────────────────────────────
-# Install setuptools and ensure pkg_resources is available before other packages
+# Install setuptools<70.0.0 to ensure pkg_resources is available (removed in 70.0.0)
 RUN pip install --upgrade pip && \
-    pip install --no-cache-dir setuptools && \
-    pip install --no-cache-dir pkg_resources
+    pip install --no-cache-dir "setuptools<70.0.0"
 
 # ── Diagnostic: Verify pkg_resources availability ──────────────────────────────
 RUN python -c "import pkg_resources; print('pkg_resources available, version:', pkg_resources.__version__)" || echo "pkg_resources still not available"
