@@ -21,9 +21,8 @@ transformers>=4.51.0,<5.0
 numpy>=1.24.0,<2.0
 
 # Parsing
-docling
-rapidocr-onnxruntime
-easyocr
+docling[easyocr]
+opencv-python-headless
 trafilatura
 pymupdf
 beautifulsoup4
