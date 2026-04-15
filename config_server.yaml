@@ -10,7 +10,7 @@ embedding:
   dense_model: "microsoft/harrier-oss-v1-0.6b"
   sparse_model: "opensearch-project/opensearch-neural-sparse-encoding-doc-v3-gte"
   device: "cuda"
-  batch_size: 16
+  batch_size: 32
 
 storage:
   milvus_uri: "http://milvus:19530"
