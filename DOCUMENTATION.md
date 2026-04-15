@@ -256,7 +256,33 @@ python cli.py eval --config config_rag.yaml --synthetic --paths ./data/doc.pdf
 
 ---
 
-## 9. Future Roadmap & Planned Features
+## 9. Stability & Performance Tuning (Lessons Learned)
+
+The following optimizations were implemented to stabilize the pipeline for production use on the research server.
+
+### A. The "Silent" OCR Failure (`libGL.so.1`)
+- **Problem**: In `python:slim` images, OCR engines like `easyocr` or `rapidocr` fail to import because `opencv-python` looks for graphical libraries (`libGL.so.1`) that don't exist in lean containers.
+- **Fix**: Used `opencv-python-headless`. This version is optimized for server environments and removes all GUI/OpenGL dependencies.
+- **Engine Preference**: `rapidocr-onnxruntime` is used as a lightweight CPU/GPU fallback, while `easyocr` is preferred for native PyTorch/CUDA acceleration on the GTX 1080.
+
+### B. PyMilvus 2.5.0 API Migration
+- **Problem**: Upgrading to Milvus 2.5.0 (to fix legacy `pkg_resources` bugs) introduced breaking keyword changes in the Python SDK.
+- **Fixes**:
+  - Renamed `param` to `search_params` in `MilvusClient.search()`.
+  - Renamed `expr` to `filter` for metadata filtering.
+  - Removed `setuptools` version pinning as PyMilvus 2.5+ no longer requires the deprecated `pkg_resources` module.
+
+### C. CUDA Out-of-Memory (OOM) Management
+- **Problem**: The SPLADE sparse embedding model (`opensearch-v3-gte`) has a 30,522-dimension output. Batch sizes of 32 exceed the 8GB VRAM limit of the GTX 1080 when running dual-models (Harrier + SPLADE).
+- **Fix**: Reduced `embedding.batch_size` to `16` (or `4` for maximum safety). This reduces the activation matrix memory pressure during the SpladePooling stage.
+
+### D. Unified Parsing (The Docling Shift)
+- **Problem**: Custom parsers (like Trafilatura) return flat strings. The `HybridChunker` requires a rich `DoclingDocument` object to recognize hierarchical headers and tables.
+- **Fix**: Centralized all parsing (PDF, HTML, DOCX) into the `Docling` `DocumentConverter`. This ensures every chunk retains its structural metadata (breadcrumbs) which is vital for the RAG reranking stage.
+
+---
+
+## 10. Future Roadmap & Planned Features
 
 ### Semantic FAQ Router (Intent Routing / Guardrails)
 To improve performance, reduce LLM costs, and ensure 100% accuracy for strictly administrative queries (e.g., "lost ID card", "leave of absence steps"), an **Intent Router** is planned to bypass the LLM entirely for high-confidence queries.

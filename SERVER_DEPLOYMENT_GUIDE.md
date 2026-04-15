@@ -438,6 +438,10 @@ This section documents every production issue encountered on `riset-01` and its 
 | `E: Problem executing scripts APT::Update::Post-Invoke` (exit code 100) | Docker 20.10 seccomp profile blocks syscalls used by apt's post-invoke cleanup scripts during build. `--security-opt` cannot be used during `docker build` on Docker 20.10 (only Docker 23+) | Remove **all** `apt-get` calls from Dockerfile. Modern PyTorch/sentence-transformers pip wheels bundle their own OpenMP runtime — `libgomp1` from the system package is not needed ✅ (already fixed) |
 | `Tokio executor failed: PermissionDenied` | `uv` package manager uses io_uring syscalls, blocked by seccomp during build | Use plain `pip` — never `uv` inside Docker on this server |
 | `cannot stat 'storage': permission denied` during build | Milvus ran as root and created root-owned directories in the build context | Add `storage/` to `.dockerignore` ✅ (already set) |
+| `TypeError: Got multiple values for keyword argument 'param' / 'expr'` | PyMilvus 2.5 renamed `param` -> `search_params` and `expr` -> `filter` | Code updated in `retriever.py` to use 2.5 syntax ✅ |
+| `AttributeError: SparseEncoder has no attribute 'encode_documents'` | Sentence-Transformers v3.x renamed methods to singular (`encode_document`) | Code updated in `sparse.py` and `retriever.py` ✅ |
+| `No OCR engine found` (despite installation) | `opencv-python` requires `libGL.so.1` which is missing in `python:slim` | Use `opencv-python-headless` in `requirements.txt` ✅ |
+| `CUDA out of memory` during ingestion | SPLADE model vocabulary expansion (30k dims) is too large for batch size 32 | Lower `batch_size` to `16` or `4` in `config_server.yaml` ✅ |
 | `Failed to initialize NumPy: _ARRAY_API not found` | NumPy 2.x broke C ABI compatibility with Torch 2.2.2 | Pin `numpy>=1.24.0,<2.0` in `requirements.txt` ✅ (already fixed) |
 | `CollectionSchema.add_field() missing ... arguments` | Wrong keyword arguments passed to Milvus schema (`name` vs `field_name`) | Fixed in `milvus_client.py` ✅ (already fixed) |
 
