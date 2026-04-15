@@ -96,7 +96,7 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ['1', '0']
+              device_ids: ['1']
               capabilities: [gpu]
 
     # ── Docker 20.10 Security Workarounds ─────────────────────────────────
