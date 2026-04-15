@@ -31,6 +31,15 @@ class IngestionPipeline:
         # We now use Docling explicitly for ALL formats (PDF, HTML, etc)
         # to ensure it returns a proper DoclingDocument with layout geometry
         # and hierarchy metadata, which HybridChunker strictly requires.
+        # Diagnostic: Force import easyocr to catch the hidden Linux ImportError
+        try:
+            import easyocr
+            logger.info("Diagnostic: easyocr imported successfully on the host!")
+        except Exception as e:
+            logger.error(f"Diagnostic FATAL easyocr import crash: {repr(e)}")
+            import traceback
+            logger.error(traceback.format_exc())
+
         converter = DocumentConverter()
         result = converter.convert(Path(file_path))
         doc = result.document
