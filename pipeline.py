@@ -52,6 +52,9 @@ class RAGPipeline:
             chunk_size=config.ingestion.chunk_size,
             chunk_overlap=config.ingestion.chunk_overlap,
             embedding_model=config.embedding.dense_model,
+            chunking_strategy=config.ingestion.chunking_strategy,
+            pdf_parser=config.ingestion.pdf_parser,
+            html_parser=config.ingestion.html_parser,
         )
         self.dense_model = dense_model or DenseEmbeddingModel(
             model_name=config.embedding.dense_model,

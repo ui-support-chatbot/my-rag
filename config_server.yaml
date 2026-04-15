@@ -2,9 +2,9 @@
 ingestion:
   chunk_size: 512
   chunk_overlap: 50
-  chunking_strategy: "fixed"
+  chunking_strategy: "hybrid"
   pdf_parser: "docling"
-  html_parser: "trafilatura"
+  html_parser: "docling"
 
 embedding:
   dense_model: "microsoft/harrier-oss-v1-0.6b"

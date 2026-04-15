@@ -17,7 +17,13 @@ class IngestionPipeline:
         chunk_size: int = 512,
         chunk_overlap: int = 50,
         embedding_model: str = "microsoft/harrier-oss-v1-0.6b",
+        chunking_strategy: str = "fixed",
+        pdf_parser: str = "docling",
+        html_parser: str = "docling",
     ):
+        self.pdf_parser = pdf_parser
+        self.html_parser = html_parser
+        self.chunking_strategy = chunking_strategy
         self.chunker = Chunker(
             embedding_model=embedding_model,
             chunk_size=chunk_size,
@@ -28,8 +34,10 @@ class IngestionPipeline:
         from docling.document_converter import DocumentConverter
         from pathlib import Path
         
-        # We use Docling explicitly for ALL formats (PDF, HTML, etc)
+        # We now use Docling explicitly for ALL formats (PDF, HTML, etc)
         # to ensure it returns a proper DoclingDocument with layout geometry.
+        # This aligns with the 'docling' parser setting in the config.
+        logger.info(f"Using {self.pdf_parser}/{self.html_parser} via Docling for: {file_path}")
         converter = DocumentConverter()
         result = converter.convert(Path(file_path))
         doc = result.document
