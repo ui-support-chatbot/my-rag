@@ -34,3 +34,6 @@ pandas
 
 # Utils
 tqdm
+
+# Fix for pkg_resources issue
+pkg-resources==0.0.0
