@@ -38,12 +38,14 @@ RUN pip install --no-cache-dir \
     "torchvision==0.17.2+cu118" \
     --extra-index-url https://download.pytorch.org/whl/cu118
 
-# Install OCR dependencies for document processing
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    tesseract-ocr \
-    libtesseract-dev \
-    libleptonica-dev \
-    && rm -rf /var/lib/apt/lists/*
+# ── NO apt-get calls in this Dockerfile ───────────────────────────────────────
+# Docker 20.10.x's seccomp profile blocks the syscalls used by apt's post-invoke
+# cleanup scripts during `docker build`. The error looks like:
+#   E: Problem executing scripts APT::Update::Post-Invoke (exit code 100)
+# `--security-opt` cannot be applied to `docker build` on Docker 20.10 (only 23+).
+#
+# OCR is handled by rapidocr-onnxruntime (pure Python/ONNX, no system packages
+# needed) — already listed in requirements.txt. Tesseract is NOT required.
 
 # Install remaining Python dependencies (torch and setuptools are already installed above)
 COPY requirements.txt .
