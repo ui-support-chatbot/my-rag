@@ -57,16 +57,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN pip uninstall -y opencv-python opencv-python-headless opencv-contrib-python && \
     pip install --no-cache-dir opencv-python-headless==4.8.1.78
 
-# ── Install system libs safely (bypassing Docker 20.10 apt-get bug) ──────────
-# Docker 20.10 blocks apt-get post-invoke scripts (causing error 100). 
-# Deleting the docker-clean config and using dpkg bypasses the seccomp issues.
-RUN rm -f /etc/apt/apt.conf.d/docker-clean && \
-    apt-get update && \
-    apt-get download libgl1 libglx-mesa0 libglapi-mesa libglib2.0-0 && \
-    dpkg --force-all -i *.deb && \
-    rm *.deb && \
-    rm -rf /var/lib/apt/lists/*
-
 # Copy project source
 COPY . .
 
