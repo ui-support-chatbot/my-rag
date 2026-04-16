@@ -18,11 +18,12 @@ To ensure high-quality text extraction and structural preservation, we use a sop
   - **All Formats (PDF, HTML, etc.)**: `Docling` (by IBM). Docling is used exclusively across all ingestion formats because it natively identifies layout structures (tables, headers, formulas) and outputs a strictly typed `DoclingDocument`. 
   - *Note on Trafilatura*: We previously used `Trafilatura` for HTML boilerplate removal. However, because our advanced `HybridChunker` specifically requires the hierarchical node metadata inside a `DoclingDocument` to function correctly, we deprecated custom flat-text parsers. Docling handles HTML natively while preserving the required structural geometry.
 - **Chunking**:
-  - We use `docling.chunking.HybridChunker` with `merge_peers=True` and `repeat_table_header=True`.
-  - This applies token-aware refinements on top of document structure, ensuring chunks fit the embedding model's token limits.
+  - We use `docling.chunking.HierarchicalChunker`. 
+  - This focuses strictly on the document's organizational hierarchy (headers, sections, lists) to produce segments that map human-logical boundaries.
   - Each chunk is **contextualized** (prepended with its heading hierarchy), providing critical context for retrieval.
   - `ChunkRecord`s include a **breadcrumb** (e.g., `"Introduction > Methods > Data Collection"`) and exact **page numbers**.
-  - Tables are preserved as Markdown and headers are repeated across split table chunks to maintain structural integrity.
+  - **Intermediate Snapshots**: For debugging, the system can save individual chunks as JSON files to `storage/snapshots` before they are embedded. This is controlled by `ingestion.save_snapshots` in the config.
+  - **Network Configuration**: To bypass host firewall (UFW) blockers that often drop packets from the Docker bridge to the host IP, we use `network_mode: host`. This removes Docker-network isolation for this container and allows it to talk to `localhost:11434` (Ollama) and `localhost:19530` (Milvus) with zero firewall interference.
 
 ### B. Embedding & Vector Storage
 

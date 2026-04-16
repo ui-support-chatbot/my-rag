@@ -161,8 +161,9 @@ services:
   rag-api:
     container_name: my-rag-api
     build: .
-    ports:
-      - "8000:8000"
+    # Use network_mode: host to bypass UFW firewall blockers between Docker and Host.
+    # Note: ports mapping is not needed/supported in host mode.
+    network_mode: host
     volumes:
       # Your documents (mounted read-only for safety)
       - ./data:/app/data:ro
@@ -207,12 +208,9 @@ services:
       - seccomp:unconfined
 
     # ── Network: Reaching Ollama on the host ──────────────────────────────
-    # Ollama runs directly on the host (not in Docker), so the container
-    # needs to reach the host's localhost. This maps host.docker.internal
-    # to the host machine's IP, allowing:
-    #   config_server.yaml:  llm_endpoint: "http://host.docker.internal:11434/v1"
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
+    # We use network_mode: host above, so the container shares the host 
+    # network and can reach Ollama/Milvus via 127.0.0.1.
+    # No extra_hosts mapping is required.
 
     depends_on:
       - milvus
@@ -450,11 +448,10 @@ This section documents every production issue encountered on `riset-01` and its 
 
 | Error | Cause | Fix |
 |-------|-------|-----|
-| `OpenBLAS blas_thread_init: pthread_create failed` | numpy/torch's BLAS spawns 16 threads; seccomp blocks `clone()` at runtime | `security_opt: [seccomp:unconfined]` + `pids_limit: -1` ✅ (already in compose) |
-| `RuntimeError: No CUDA GPUs are available` | Reranker loads on GPU but container has no GPU access | Ensure `deploy.resources.reservations.devices` is in compose ✅ |
-| `Milvus Lite: file opened by another program` | milvus-lite SQLite lock — only one process can use it at a time | Use Milvus Standalone (3-container stack) instead of milvus-lite ✅ |
-| `Connection refused` to Ollama from container | Wrong `llm_endpoint` in config_server.yaml | Use `http://host.docker.internal:11434/v1` (not `localhost`) ✅ (already in config_server.yaml) |
-| `OPENAI_API_KEY not found` | Ollama requires the var set even though it's a dummy | `environment: OPENAI_API_KEY=dummy` ✅ (already in compose) |
+| `Connection refused` or `Timeout` to Ollama | Host firewall (UFW) blocking Docker bridge traffic | Use `network_mode: host` in compose and `127.0.0.1` in config ✅ |
+| `Milvus connector failed: name resolution` | Host mode container cannot resolve Docker name `milvus` | Use `http://127.0.0.1:19530` in `config_server.yaml` ✅ |
+| `ImportError: bitsandbytes quantization` | Missing `bitsandbytes` or `accelerate` | Add to `requirements.txt` and rebuild image ✅ |
+| `OPENAI_API_KEY not found` | Ollama requires the var set | `environment: OPENAI_API_KEY=dummy` ✅ |
 | Port 8000 unreachable from network | Server firewall (`ufw`) blocking the port | Ask server admin: `sudo ufw allow 8000/tcp` |
 
 ### Performance
