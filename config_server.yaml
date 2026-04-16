@@ -15,7 +15,7 @@ embedding:
   quantize_8bit: true
 
 storage:
-  milvus_uri: "http://milvus:19530"
+  milvus_uri: "http://127.0.0.1:19530"
   collection_name: "documents"
   db_name: "default"
   metric_type: "COSINE"
