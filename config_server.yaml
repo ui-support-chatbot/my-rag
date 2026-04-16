@@ -12,7 +12,7 @@ embedding:
   sparse_model: "opensearch-project/opensearch-neural-sparse-encoding-doc-v3-gte"
   device: "cuda"
   batch_size: 32
-  quantize_8bit: false
+  quantize_8bit: true
 
 storage:
   milvus_uri: "http://milvus:19530"
@@ -28,7 +28,7 @@ retrieval:
   min_score: 0.0
 
 generation:
-  llm_endpoint: "http://172.17.0.1:11434/v1"
+  llm_endpoint: "http://152.118.31.54:11434/v1"
   model_name: "qwen2.5:7b"
   max_tokens: 1200
   temperature: 0.7
