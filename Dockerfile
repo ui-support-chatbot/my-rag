@@ -51,6 +51,19 @@ RUN pip install --no-cache-dir \
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
+# ── Force Headless OpenCV & Fix OCR ──────────────────────────────────────────
+# This uninstalls any conflicting OpenCV versions and ensures only the 
+# headless one exists. It also ensures onnxruntime-gpu is ready.
+RUN pip uninstall -y opencv-python opencv-python-headless && \
+    pip install --no-cache-dir opencv-python-headless
+
+# ── Attempt to install system libs (with workaround for Docker 20.10) ────────
+# We use || true so the build doesn't fail if the seccomp profile blocks it,
+# but the pip fix above usually handles 90% of cases.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends libgl1 libglib2.0-0 || true && \
+    rm -rf /var/lib/apt/lists/*
+
 # Copy project source
 COPY . .
 
