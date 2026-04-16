@@ -253,7 +253,9 @@ class RAGPipeline:
             f"(retrieved {len(docs)} total after RRF)"
         )
 
-        # Unload retriever models to free VRAM for the LLM
+        # Unload retriever models to free VRAM for the LLM.
+        # NOTE: This is a trade-off. It saves GPU memory but increases query
+        # latency because models must be re-loaded for the next request.
         self.retriever.unload_models()
 
         # LLM.generate handles context formatting with Source [breadcrumb] markers

@@ -268,6 +268,11 @@ The following optimizations were implemented to stabilize the pipeline for produ
 - **Problem**: The SPLADE sparse embedding model (`opensearch-v3-gte`) has a 30,522-dimension output. Batch sizes of 32 exceed the 8GB VRAM limit of the GTX 1080 when running dual-models (Harrier + SPLADE).
 - **Fix**: Reduced `embedding.batch_size` to `16` (or `4` for maximum safety). This reduces the activation matrix memory pressure during the SpladePooling stage.
 
+| **Issue** | **Root Cause** | **Resolution** |
+|---|---|---|
+| `CUDA out of memory` during ingestion | SPLADE model vocabulary expansion (30k dims) is too large for batch size 32 | Lower `batch_size` to `16` or `4` in `config_server.yaml` ✅ |
+| **Increased Query Latency** | Lazy loading/unloading of models to save VRAM | This is a known trade-off to allow the LLM and RAG models to share a single GPU. Models are loaded on-demand and unloaded after retrieval. ✅ |
+
 ### D. GPU Memory Competition Issue
 - **Problem**: When running the RAG system in Docker with GPU access, the RAG embedding models (Harrier, OpenSearch, Jina-reranker) compete for GPU memory with the LLM backend (Ollama). The nvidia-smi output shows multiple processes consuming GPU memory: Ollama (5.47 GiB) and the RAG Python process (2.55 GiB), leading to CUDA OOM errors.
 - **Solution**:
@@ -276,6 +281,11 @@ The following optimizations were implemented to stabilize the pipeline for produ
      - GPU 1: Reranker model (Jina-v3) and LLM
   2. **Memory Management**: Add explicit torch.cuda.empty_cache() calls after intensive operations
   3. **Environment Variable**: Set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to reduce memory fragmentation
+
+### F. Lazy Loading & Model Offloading (Latency Trade-off)
+- **Mechanism**: To stay within the 8GB VRAM limit while running a local LLM, the RAG pipeline uses **Lazy Loading**. The Embedding and Reranker models are loaded into VRAM only when needed and explicitly unloaded after the retrieval stage.
+- **Latency Impact**: This introduces a delay on every query (~5-10 seconds) because weights must be moved from Disk to GPU memory for every inference call.
+- **Optimization**: For faster performance on higher-end hardware (24GB+ VRAM), this behavior can be toggled by persistent model loading.
 
 ### E. Unified Parsing (The Docling Shift)
 - **Problem**: Custom parsers (like Trafilatura) return flat strings. The `HybridChunker` requires a rich `DoclingDocument` object to recognize hierarchical headers and tables.

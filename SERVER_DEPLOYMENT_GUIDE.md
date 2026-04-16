@@ -442,6 +442,7 @@ This section documents every production issue encountered on `riset-01` and its 
 | `AttributeError: SparseEncoder has no attribute 'encode_documents'` | Sentence-Transformers v3.x renamed methods to singular (`encode_document`) | Code updated in `sparse.py` and `retriever.py` ✅ |
 | `No OCR engine found` (despite installation) | `opencv-python` requires `libGL.so.1` which is missing in `python:slim` | Use `opencv-python-headless` in `requirements.txt` ✅ |
 | `CUDA out of memory` during ingestion | SPLADE model vocabulary expansion (30k dims) is too large for batch size 32 | Lower `batch_size` to `16` or `4` in `config_server.yaml` ✅ |
+| **Increased Query Latency** | Models are lazily loaded and unloaded to save VRAM | This is a known trade-off to allow the LLM and RAG models to share a single GPU. Models are loaded on-demand and unloaded after retrieval. ✅ |
 | `Failed to initialize NumPy: _ARRAY_API not found` | NumPy 2.x broke C ABI compatibility with Torch 2.2.2 | Pin `numpy>=1.24.0,<2.0` in `requirements.txt` ✅ (already fixed) |
 | `CollectionSchema.add_field() missing ... arguments` | Wrong keyword arguments passed to Milvus schema (`name` vs `field_name`) | Fixed in `milvus_client.py` ✅ (already fixed) |
 
