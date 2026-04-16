@@ -41,7 +41,12 @@ class LLM:
             try:
                 from openai import OpenAI
 
-                self._client = OpenAI(base_url=self.endpoint, api_key="dummy")
+                # Increased timeout to 300s to accommodate local model loading/inference
+                self._client = OpenAI(
+                    base_url=self.endpoint, 
+                    api_key="dummy",
+                    timeout=300.0
+                )
             except Exception as e:
                 logger.warning(f"Failed to initialize OpenAI client: {e}")
         return self._client

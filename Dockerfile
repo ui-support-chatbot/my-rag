@@ -53,15 +53,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # ── Force Headless OpenCV & Fix OCR ──────────────────────────────────────────
 # This uninstalls any conflicting OpenCV versions and ensures only the 
-# headless one exists. It also ensures onnxruntime-gpu is ready.
-RUN pip uninstall -y opencv-python opencv-python-headless && \
-    pip install --no-cache-dir opencv-python-headless
+# headless one exists. Pinned to 4.8.1.78 as 4.9+ has an upstream bug linking libGL.
+RUN pip uninstall -y opencv-python opencv-python-headless opencv-contrib-python && \
+    pip install --no-cache-dir opencv-python-headless==4.8.1.78
 
-# ── Attempt to install system libs (with workaround for Docker 20.10) ────────
-# We use || true so the build doesn't fail if the seccomp profile blocks it,
-# but the pip fix above usually handles 90% of cases.
+# ── Install system libs safely (bypassing Docker 20.10 apt-get bug) ──────────
+# Docker 20.10 blocks apt-get post-invoke scripts. Downloading the debs and 
+# unpacking them with dpkg bypasses the clone3() / seccomp issue entirely.
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends libgl1 libglib2.0-0 || true && \
+    apt-get download libgl1 libglx-mesa0 libglapi-mesa libglib2.0-0 && \
+    dpkg --force-all -i *.deb && \
+    rm *.deb && \
     rm -rf /var/lib/apt/lists/*
 
 # Copy project source
