@@ -17,6 +17,7 @@ class EmbeddingConfig:
     dense_model: str = "microsoft/harrier-oss-v1-0.6b"
     sparse_model: str = "opensearch-project/opensearch-neural-sparse-encoding-doc-v3-gte"
     device: str = "cuda"
+    quantize_8bit: bool = True
     batch_size: int = 32
 
 
@@ -38,6 +39,7 @@ class RetrievalConfig:
 
     hybrid_weight: float = 0.5
     reranker_model: Optional[str] = "jinaai/jina-reranker-v3"
+    reranker_quantize_8bit: bool = True
     min_score: float = 0.0
 
 

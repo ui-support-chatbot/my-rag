@@ -29,6 +29,7 @@ class Retriever:
         reranker_model: Optional[str] = "jinaai/jina-reranker-v3",
         k: int = 50,
         hybrid_weight: float = 0.5,
+        reranker_quantize_8bit: bool = False,
     ):
         self.dense_model = dense_model
         self.sparse_model = sparse_model
@@ -36,30 +37,59 @@ class Retriever:
         self.reranker_model = reranker_model
         self.k = k
         self.hybrid_weight = hybrid_weight
+        self.reranker_quantize_8bit = reranker_quantize_8bit
         self._reranker = None
         self.device = "cuda" if _has_cuda() else "cpu"
 
-    @property
-    def reranker(self):
-        """Lazily load jina-reranker-v3 via AutoModel with trust_remote_code.
+    def load_models(self):
+        """Pre-load all models into memory."""
+        self.dense_model.load()
+        # Sparse model on CPU is fast to load, but we can call load() anyway
+        self.sparse_model.load()
+        self.load_reranker()
 
-        The model exposes a high-level .rerank(query, docs) method and does NOT
-        use the standard sequence-classification head, so we must NOT load it
-        with AutoModelForSequenceClassification.
-        """
+    def unload_models(self):
+        """Unload all models from memory to free VRAM for LLMs."""
+        self.dense_model.unload()
+        self.sparse_model.unload()
+        self.unload_reranker()
+
+    def load_reranker(self):
+        """Lazily load jina-reranker-v3 via AutoModel with trust_remote_code."""
         if self._reranker is None and self.reranker_model:
             from transformers import AutoModel
 
+            kwargs = {
+                "dtype": "auto",
+                "trust_remote_code": True,
+            }
+            if self.reranker_quantize_8bit:
+                kwargs["load_in_8bit"] = True
+
             model = AutoModel.from_pretrained(
                 self.reranker_model,
-                dtype="auto",
-                trust_remote_code=True,
+                **kwargs
             )
             model.eval()
-            if _has_cuda():
+            if _has_cuda() and not self.reranker_quantize_8bit:
                 model = model.cuda()
             self._reranker = {"model": model}
         return self._reranker
+
+    def unload_reranker(self):
+        if self._reranker is not None:
+            import gc
+            import torch
+            del self._reranker
+            self._reranker = None
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+    @property
+    def reranker(self):
+        return self.load_reranker()
+
 
     def _build_filter(
         self,

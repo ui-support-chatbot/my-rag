@@ -14,6 +14,7 @@ embedding:
   dense_model: "microsoft/harrier-oss-v1-0.6b"
   sparse_model: "opensearch-project/opensearch-neural-sparse-encoding-doc-v3-gte"
   device: "cuda"
+  quantize_8bit: true
   batch_size: 32
 
 # Vector storage
@@ -28,6 +29,7 @@ retrieval:
   rerank_top_k: 5               # Docs passed to the LLM after reranking (prevents token overflow)
   hybrid_weight: 0.5
   reranker_model: "jinaai/jina-reranker-v3"  # Set to null to disable
+  reranker_quantize_8bit: true
   min_score: 0.0
 
 # LLM generation
