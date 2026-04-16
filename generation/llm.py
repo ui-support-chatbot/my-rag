@@ -59,11 +59,11 @@ class LLM:
     ) -> GenerationResult:
         from generation.prompts import DEFAULT_SYSTEM_PROMPT
 
-        # Format context with Source [breadcrumb] markers
+        # Format context with Source [breadcrumb] and [URL] markers
         if retrieved_docs:
             formatted_context = "\n\n".join(
                 [
-                    f"Source [{doc.metadata.get('breadcrumb', 'Unknown')}]: {doc.text}"
+                    f"Source [{doc.metadata.get('breadcrumb', 'Unknown')}] (URL: {doc.metadata.get('source_url', 'N/A')}): {doc.text}"
                     for doc in retrieved_docs
                 ]
             )
@@ -88,11 +88,12 @@ class LLM:
 
             sources = []
             if retrieved_docs:
-                sources = [
+                    sources = [
                     {
                         "breadcrumb": doc.metadata.get("breadcrumb", "Unknown"),
                         "filename": doc.metadata.get("source", "Unknown"),
                         "page": doc.metadata.get("page_number", "Unknown"),
+                        "url": doc.metadata.get("source_url"),
                     }
                     for doc in retrieved_docs
                 ]

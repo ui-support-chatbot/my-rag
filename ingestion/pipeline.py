@@ -6,6 +6,7 @@ from ingestion.chunker import Chunker
 
 import logging
 import os
+import json
 from typing import List
 
 logger = logging.getLogger(__name__)
@@ -77,8 +78,30 @@ class IngestionPipeline:
         if doc_id is None:
             doc_id = os.path.splitext(os.path.basename(file_path))[0]
 
-        # Pass the DoclingDocument and filename to the HierarchicalChunker
-        chunks = self.chunker.chunk(doc, filename=file_path, doc_id=doc_id)
+        # --- Load External Metadata ---
+        external_metadata = {}
+        dir_path = os.path.dirname(file_path)
+        
+        # 1. Look for page.meta.json in same dir
+        page_meta_path = os.path.join(dir_path, "page.meta.json")
+        if os.path.exists(page_meta_path):
+            try:
+                with open(page_meta_path, "r", encoding="utf-8") as f:
+                    external_metadata.update(json.load(f))
+            except Exception as e:
+                logger.warning(f"Error loading {page_meta_path}: {e}")
+        
+        # 2. Look for {filename}.meta.json (more specific, overrides page-level)
+        file_meta_path = f"{file_path}.meta.json"
+        if os.path.exists(file_meta_path):
+            try:
+                with open(file_meta_path, "r", encoding="utf-8") as f:
+                    external_metadata.update(json.load(f))
+            except Exception as e:
+                logger.warning(f"Error loading {file_meta_path}: {e}")
+
+        # Pass findings to the Chunker
+        chunks = self.chunker.chunk(doc, filename=file_path, doc_id=doc_id, external_metadata=external_metadata)
 
         return chunks
 

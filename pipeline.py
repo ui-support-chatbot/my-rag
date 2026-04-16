@@ -148,19 +148,20 @@ class RAGPipeline:
         # ── 3. Build records & Insert ─────────────────────────────────────────
         data = []
         for chunk, dense_emb, sparse_emb in zip(chunks, all_dense, all_sparse):
-            data.append(
-                {
-                    "doc_id": chunk.doc_id,
-                    "text": chunk.text,
-                    "chunk_index": chunk.chunk_index,
-                    "dense_embedding": dense_emb,
-                    "sparse_embedding": sparse_emb,
-                    "breadcrumb": chunk.breadcrumb,
-                    "page_number": chunk.page_number,
-                    "source": chunk.filename,
-                    **chunk.metadata,
-                }
-            )
+            record = {
+                "doc_id": chunk.doc_id,
+                "text": chunk.text,
+                "chunk_index": chunk.chunk_index,
+                "dense_embedding": dense_emb,
+                "sparse_embedding": sparse_emb,
+                "breadcrumb": chunk.breadcrumb,
+                "page_number": chunk.page_number,
+                "source": chunk.filename,
+                "source_url": chunk.metadata.get("source_url", ""),
+            }
+            # Add all other metadata fields
+            record.update(chunk.metadata)
+            data.append(record)
 
         self.storage.insert(collection_name, data)
         logger.info(f"Indexed {len(data)} chunks into '{collection_name}'")
