@@ -1,152 +1,52 @@
-# Handover Prompt: RAG System Debugging Enhancements
+# Handover Prompt: GPU Memory Optimization for RAG Retrieval Pipeline
 
-## Summary of Work Completed
+## Problem
+The current retrieval pipeline loads three models (dense, sparse, reranker) simultaneously on the same GPU, consuming approximately 8GB of VRAM. This leaves insufficient memory for a local LLM (e.g., Llama 3 8B requires ~16GB in FP16, but we can use quantization to reduce it to ~8GB, so we need to free up as much as possible).
 
-I have successfully implemented comprehensive debugging enhancements for the RAG system to address the GPU memory issues and provide better visibility into the pipeline stages.
+## Goal
+Reduce the GPU memory footprint of the retrieval pipeline to under 4GB, allowing the local LLM to run on the same GPU.
 
-## Problems Identified and Solved
+## Proposed Solutions
+1. **Lazy Loading and Model Offloading**:
+   - Load the dense model only when needed for query encoding, then move it to CPU.
+   - Load the reranker model only when needed for reranking, then move it to CPU.
+   - The sparse model's neural component is only required for document encoding (during ingestion). For query encoding, only the tokenizer and IDF table are needed (which are CPU-resident). Therefore, we can keep the sparse model on CPU at all times, or load it only during ingestion and then unload.
 
-### 1. GPU Memory Issues
-**Problem**: The RAG system was experiencing CUDA out of memory errors due to:
-- Competition between RAG embedding/reranking models and Ollama LLM for GPU memory
-- Memory fragmentation in PyTorch
-- Lack of proper GPU memory cleanup between operations
+2. **8-bit Quantization**:
+   - Use 8-bit quantization for the dense and reranker models to reduce their memory footprint by approximately 50%.
+   - This can be done by setting `load_in_8bit=True` when loading the models with Hugging Face's `transformers` or `sentence_transformers`.
 
-**Solutions Implemented**:
-- Added `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` environment variable to docker-compose.yml to reduce memory fragmentation
-- Added explicit `torch.cuda.empty_cache()` calls after intensive operations in:
-  - `embedding/dense.py` (after document and query embedding)
-  - `embedding/sparse.py` (after document and query embedding)
-  - `retrieval/retriever.py` (after reranking)
-  - `pipeline.py` (after query processing)
-  - `api.py` (after each API query request)
+3. **Pre-compute Embeddings**:
+   - Since document embeddings are static, we can pre-compute and store the dense and sparse vectors for all documents during ingestion.
+   - At query time, we only need to compute the query's dense and sparse vectors (which are cheap) and then perform vector search in Milvus.
+   - This eliminates the need to keep the document encoding models in memory during retrieval.
 
-### 2. Missing Debugging Capabilities
-**Problem**: No way to inspect intermediate pipeline stages (chunks, retrieval results, reranked results) without triggering LLM generation.
+## Implementation Plan
+Step 1: Modify the sparse model to run on CPU only (since its neural part is not needed for query encoding).
+Step 2: Implement lazy loading for the dense and reranker models in the retriever, with methods to load and unload.
+Step 3: Add 8-bit quantization options in the model loading configuration.
+Step 4: (Optional) Implement pre-compute embeddings for documents if not already done.
 
-**Solutions Implemented**:
-- Added three new API endpoints:
-  - `POST /debug/chunks` - View chunks after chunking but before embedding
-  - `POST /debug/retrieve` - View retrieval results after RRF fusion but before reranking
-  - `POST /debug/rerank` - View reranked results after Jina reranking but before LLM generation
-- Added two new CLI commands:
-  - `python cli.py inspect-chunks` - Inspect chunks with options for stats and filtering
-  - `python cli.py debug-query` - Debug queries with full pipeline inspection
-- Enhanced pipeline with `save_chunks_before_embedding()` method to save chunks to file before embedding
-- Added detailed data structures with comprehensive metadata (doc_id, breadcrumb, page_number, etc.)
+## Expected Outcome
+After implementation, the retrieval pipeline should use approximately:
+   - Dense model (0.6B, 8-bit): ~0.6GB
+   - Sparse model (on CPU): ~0GB GPU
+   - Reranker (0.6B, 8-bit): ~0.6GB
+   - Total: ~1.2GB (plus overhead for activations and Milvus, aiming for under 2GB)
 
-### 3. Technical Issues Encountered and Fixed
+This leaves ample room for a quantized LLM (e.g., Llama 3 8B in 4-bit: ~4GB) on the same GPU.
 
-**Issue 1: Pydantic Validation Error**
-- **Problem**: `ValidationError` for `RetrievedDocInfo` - `page_number` field expected integer but received `None`
-- **Root Cause**: Some retrieved documents had `None` values for page_number in metadata
-- **Fix**: Updated API endpoints to handle None values with `doc.metadata.get("page_number") or 0`
+## Files to Modify
+- `embedding/dense.py`: Add lazy loading and quantization.
+- `embedding/sparse.py`: Change to load on CPU by default, and only load the neural part during ingestion if needed.
+- `retrieval/retriever.py`: Implement lazy loading for dense and reranker models, and unload after use.
+- `config_rag.yaml`: Add configuration for quantization and device mapping.
 
-**Issue 2: Missing OCR Dependencies**
-- **Problem**: Docling OCR engines not available - "No OCR engine found" warnings
-- **Root Cause**: Missing tesseract-ocr and related dependencies in Docker image
-- **Fix**: Added OCR dependencies to Dockerfile:
-  ```
-  RUN apt-get update && apt-get install -y --no-install-recommends \
-      tesseract-ocr \
-      libtesseract-dev \
-      libleptonica-dev \
-      && rm -rf /var/lib/apt/lists/*
-  ```
+## Testing
+- Verify that the retrieval results remain accurate after changes.
+- Measure GPU memory usage before and after each optimization.
+- Ensure that the local LLM can run without OOM errors.
 
-## Files Modified
-
-1. **API Endpoints and Debugging Features**:
-   - `api.py` - Added debug endpoints and fixed Pydantic validation
-   - `pipeline.py` - Added `save_chunks_before_embedding()` method
-   - `cli.py` - Added `inspect-chunks` and `debug-query` CLI commands
-
-2. **Documentation**:
-   - `DOCUMENTATION.md` - Added sections for new debug endpoints and CLI usage
-   - `HANDOVER_PROMPT.md` - This file (summary of work done)
-
-3. **Infrastructure**:
-   - `docker-compose.yml` - Added `PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True` environment variable
-   - `Dockerfile` - Added OCR dependencies for document processing
-
-## How to Use the New Debugging Features
-
-### API Endpoints (after restarting Docker):
-1. View chunks before embedding:
-   ```bash
-   curl -X POST http://localhost:8000/debug/chunks \
-     -H "Content-Type: application/json" \
-     -d '{
-       "directory_path": "./data",
-       "save_to_file": true,
-       "output_format": "json"
-     }'
-   ```
-
-2. View retrieval results (before reranking):
-   ```bash
-   curl -X POST http://localhost:8000/debug/retrieve \
-     -H "Content-Type: application/json" \
-     -d '{
-       "query": "your query here",
-       "k": 10
-     }'
-   ```
-
-3. View reranked results (before LLM):
-   ```bash
-   curl -X POST http://localhost:8000/debug/rerank \
-     -H "Content-Type: application/json" \
-     -d '{
-       "query": "your query here",
-       "k": 10,
-       "rerank_top_k": 5
-     }'
-   ```
-
-### CLI Commands:
-1. Inspect chunks:
-   ```bash
-   python cli.py inspect-chunks --config config_rag.yaml --directory ./data --show-stats
-   ```
-
-2. Debug a query with full pipeline inspection:
-   ```bash
-   python cli.py debug-query --config config_rag.yaml --query "your query" --show-stages --output-format detailed
-   ```
-
-### Web Interface:
-Visit `http://localhost:8000/docs` to see all endpoints including the new debug ones with interactive testing.
-
-## Deployment Instructions
-
-To apply these changes:
-
-1. **Stop existing containers**:
-   ```bash
-   docker-compose down
-   ```
-
-2. **Rebuild the API service** (to include code changes):
-   ```bash
-   docker-compose build rag-api
-   ```
-
-3. **Start services with new configuration**:
-   ```bash
-   docker-compose up -d
-   ```
-
-4. **Wait for services to start** (check with `docker-compose ps`)
-
-5. **Test the new endpoints** using the examples above
-
-## Verification
-
-After deployment, you should be able to:
-- Access the new debug endpoints without 404 errors
-- Use the new CLI commands without errors
-- See improved GPU memory usage (less fragmentation)
-- Have OCR functionality working for PDF processing
-
-The existing indexed data in Milvus remains intact and compatible with these changes - no re-ingestion is required.
+## Notes
+- We must be cautious about the trade-off between memory savings and latency (loading models takes time). We may want to keep models loaded in a warm state if queries are frequent.
+- The sparse model's neural component is only used during ingestion, so we can load it on GPU only during ingestion and then unload.

@@ -85,53 +85,7 @@ For late-stage precision, we use a **Listwise Cross-Encoder Reranker**:
 
 ## 3. The Dual-Routing Map
 
-```mermaid
-graph TD
-    %% Ingestion Logic
-    subgraph Ingestion ["1. INGESTION (Build Time)"]
-        Chunks["Chunked Text"]
-        D_Ingest["Harrier-0.6B (Plain)"]
-        S_Ingest["OpenSearch-v3 (Full Neural)"]
-        Storage[("Milvus Database")]
-
-        Chunks -->|"embed_documents<br/>No Prompt"| D_Ingest
-        Chunks -->|"embed_documents<br/>Deep Expansion"| S_Ingest
-        D_Ingest --> Milvus_D["Dense Collection"]
-        S_Ingest --> Milvus_S["Sparse Collection"]
-        Milvus_D --> Storage
-        Milvus_S --> Storage
-    end
-
-    %% Query Logic
-    subgraph Query ["2. QUERY (Search Time)"]
-        UserQ["User Query"]
-        D_Query["Harrier-0.6B + Prompt"]
-        S_Query["OpenSearch-v3 (IDF-Only)"]
-        Search["Hybrid Search & RRF (k=60)"]
-
-        UserQ -->|"'web_search_query'"| D_Query
-        UserQ -->|"Inference-Free IDF"| S_Query
-        D_Query --> Search
-        S_Query --> Search
-    end
-
-    %% Reranking & Generation
-    subgraph Rerank ["3. REFINEMENT & GENERATION"]
-        CE["Jina-Reranker-v3"]
-        Slice["Top-K Slice (rerank_top_k=5)"]
-        LLM["Grounded Answer"]
-
-        Search -->|"Top-50 Fusion"| CE
-        CE -->|"Listwise Rerank"| Slice
-        Slice -->|"Top-5 Context"| LLM
-    end
-
-    style Ingestion fill:#f9f9ff,stroke:#666,stroke-width:2px
-    style Query fill:#fff9f9,stroke:#666,stroke-width:2px
-    style Rerank fill:#f9fff9,stroke:#666,stroke-width:2px
-```
-
----
+![alt text](<assets/routing-map.png>)
 
 ## 4. Pipeline Data Flow
 

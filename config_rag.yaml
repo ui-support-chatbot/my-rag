@@ -7,6 +7,7 @@ ingestion:
   chunking_strategy: "fixed"  # or "semantic"
   pdf_parser: "docling"
   html_parser: "trafilatura"
+  save_snapshots: true  # Automatically save chunks to storage/snapshots before embedding
 
 # Embedding models
 embedding:

@@ -9,14 +9,11 @@ services:
     environment:
       - ETCD_AUTO_COMPACTION_RETENTION_REASON=periodic
       - ETCD_AUTO_COMPACTION_RETENTION_RUNTIME=1h
-    command: etcd
-      -advertise-client-urls http://127.0.0.1:2379
-      -listen-client-urls http://0.0.0.0:2379
-      --data-dir /etcd
+    command: etcd -advertise-client-urls http://127.0.0.1:2379 -listen-client-urls http://0.0.0.0:2379 --data-dir /etcd
     volumes:
       - etcd-data:/etcd
     healthcheck:
-      test: ["CMD", "etcdctl", "endpoint", "health"]
+      test: [ "CMD", "etcdctl", "endpoint", "health" ]
       interval: 15s
       timeout: 10s
       retries: 5
@@ -34,7 +31,7 @@ services:
     volumes:
       - minio-data:/data
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
+      test: [ "CMD", "curl", "-f", "http://localhost:9000/minio/health/live" ]
       interval: 15s
       timeout: 10s
       retries: 5
@@ -47,7 +44,7 @@ services:
   milvus:
     container_name: myrag-milvus
     image: milvusdb/milvus:v2.4.0
-    command: ["milvus", "run", "standalone"]
+    command: [ "milvus", "run", "standalone" ]
     environment:
       - ETCD_ENDPOINTS=etcd:2379
       - MINIO_ADDRESS=minio:9000
@@ -57,7 +54,7 @@ services:
       - "19530:19530"
     # Milvus exposes a health endpoint on port 9091
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      test: [ "CMD", "curl", "-f", "http://localhost:9091/healthz" ]
       interval: 15s
       timeout: 10s
       retries: 10
@@ -83,6 +80,8 @@ services:
       - ./config_server.yaml:/app/config_rag.yaml
       # Cache HuggingFace model weights across restarts (~5-10 GB total)
       - ./storage/hf_cache:/root/.cache/huggingface
+      # Debugging: saved chunks before embedding (snapshots)
+      - ./storage/snapshots:/app/storage/snapshots
     environment:
       - RAG_CONFIG_PATH=/app/config_rag.yaml
       # Ollama and OpenAI-compatible endpoints require this var even with a dummy value
@@ -98,8 +97,8 @@ services:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: ['0', '1']
-              capabilities: [gpu]
+              device_ids: [ '0', '1' ]
+              capabilities: [ gpu ]
 
     # ── Docker 20.10 Security Workarounds ─────────────────────────────────
     # pids_limit: -1          → removes PID limit so PyTorch/OpenBLAS can spawn threads
@@ -125,6 +124,6 @@ services:
 volumes:
   etcd-data:
   minio-data:
-  milvus-data:
-  # Named volume for hf_cache as fallback (bind mount in ./storage/hf_cache is preferred)
+  milvus-data: # Named volume for hf_cache as fallback (bind mount in ./storage/hf_cache is preferred)
+
   hf_cache:

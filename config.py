@@ -9,6 +9,7 @@ class IngestionConfig:
     chunking_strategy: str = "fixed"
     pdf_parser: str = "docling"
     html_parser: str = "trafilatura"
+    save_snapshots: bool = False  # Set to True to save JSON snapshots of chunks before embedding
 
 
 @dataclass

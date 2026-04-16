@@ -120,6 +120,10 @@ class RAGPipeline:
             logger.warning("No chunks produced — nothing to index.")
             return 0
 
+        # Create a debug snapshot of the chunks if enabled in config
+        if self.config.ingestion.save_snapshots:
+            self.save_chunks_before_embedding(chunks=chunks, output_prefix=f"ingest_{doc_id_prefix}")
+
         # ── 2. Batch Embed (one forward pass per model, not one per chunk) ───
         # This is 10-30× faster than embedding chunk-by-chunk in a loop.
         texts = [c.text for c in chunks]
@@ -165,59 +169,53 @@ class RAGPipeline:
         self,
         paths: List[str] = None,
         directory: str = None,
-        doc_id_prefix: str = "doc",
-        output_file: str = None
+        chunks: List[Any] = None,
+        output_prefix: str = "manual",
     ) -> List:
-        """Save chunks to file before embedding for debugging purposes."""
-        chunks = []
-        if paths:
-            for i, path in enumerate(paths):
-                doc_id = f"{doc_id_prefix}_{i:03d}"
-                file_chunks = self.ingestion.process_file(path, doc_id=doc_id)
-                chunks.extend(file_chunks)
-
-        if directory:
-            dir_chunks = self.ingestion.process_directory(directory)
-            chunks.extend(dir_chunks)
+        """
+        Saves a snapshot of chunks to disk for debugging/inspection.
+        Can process files/directories OR accept a list of pre-processed chunks.
+        """
+        if not chunks:
+            chunks = []
+            if paths:
+                for i, path in enumerate(paths):
+                    file_chunks = self.ingestion.process_file(path, doc_id=f"doc_{i:03d}")
+                    chunks.extend(file_chunks)
+            if directory:
+                dir_chunks = self.ingestion.process_directory(directory)
+                chunks.extend(dir_chunks)
 
         if not chunks:
-            logger.warning("No chunks produced — nothing to save.")
+            logger.warning("No chunks to save.")
             return []
 
-        # Save chunks to file if requested
-        if output_file:
-            import json
-            from datetime import datetime
-            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            filename = f"{output_file}_{timestamp}.json"
-            filepath = f"./debug_output/{filename}"
-            
-            # Create debug_output directory if it doesn't exist
-            import os
-            os.makedirs("./debug_output", exist_ok=True)
-            
-            # Prepare chunk data for saving
-            chunk_data = []
-            for i, chunk in enumerate(chunks):
-                chunk_info = {
-                    "id": i,
-                    "doc_id": chunk.doc_id,
-                    "chunk_index": chunk.chunk_index,
-                    "text": chunk.text,
-                    "breadcrumb": chunk.breadcrumb,
-                    "page_number": chunk.page_number,
-                    "filename": chunk.filename,
-                    "char_count": len(chunk.text),
-                    "token_count": len(chunk.text) // 4,  # Rough estimate
-                    "metadata": dict(chunk.metadata) if chunk.metadata else {}
-                }
-                chunk_data.append(chunk_info)
-            
-            with open(filepath, 'w', encoding='utf-8') as f:
-                json.dump(chunk_data, f, indent=2, ensure_ascii=False)
-            
-            logger.info(f"Saved {len(chunks)} chunks to {filepath}")
-        
+        # Serialization logic
+        from datetime import datetime
+        import os
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"{output_prefix}_{timestamp}.json"
+        snapshot_dir = Path("storage/snapshots")
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        filepath = snapshot_dir / filename
+
+        chunk_data = [
+            {
+                "id": i,
+                "doc_id": c.doc_id,
+                "text": c.text,
+                "breadcrumb": c.breadcrumb,
+                "token_estimate": len(c.text) // 4,
+                "metadata": dict(c.metadata) if c.metadata else {},
+            }
+            for i, c in enumerate(chunks)
+        ]
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(chunk_data, f, indent=2, ensure_ascii=False)
+
+        logger.info(f"Chunk snapshot saved to {filepath}")
         return chunks
 
     def query(
