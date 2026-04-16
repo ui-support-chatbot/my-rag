@@ -36,3 +36,7 @@ pandas
 
 # Utils
 tqdm
+
+# Quantization & Performance
+bitsandbytes>=0.43.0
+accelerate>=0.28.0
