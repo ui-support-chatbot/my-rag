@@ -71,8 +71,7 @@ services:
   rag-api:
     container_name: my-rag-api
     build: .
-    ports:
-      - "8000:8000"
+    network_mode: host
     volumes:
       # Source documents (read-only)
       - ./data:/app/data:ro

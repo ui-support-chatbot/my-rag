@@ -26,11 +26,14 @@ def check_hostname(hostname):
 
 if __name__ == "__main__":
     if len(sys.argv) < 2:
-        # Default test for Ollama on host bridge and public IP
+        # Default test for Ollama on localhost, host bridge, and public IP
+        localhost_ip = "127.0.0.1"
         host_ip = "172.17.0.1"
         server_ip = "152.118.31.54"
-        check_hostname("host.docker.internal")
         
+        print("--- Testing Localhost (Host Network) ---")
+        test_connection(f"http://{localhost_ip}:11434/api/tags")
+
         print("\n--- Testing Bridge IP ---")
         test_connection(f"http://{host_ip}:11434/api/tags")
         
