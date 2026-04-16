@@ -5,6 +5,7 @@ ingestion:
   chunking_strategy: "hybrid"
   pdf_parser: "docling"
   html_parser: "docling"
+  save_snapshots: true
 
 embedding:
   dense_model: "microsoft/harrier-oss-v1-0.6b"
