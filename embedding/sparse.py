@@ -21,14 +21,13 @@ class SparseEmbeddingModel(BaseEmbeddingModel):
     def __init__(
         self,
         model_name: str = "opensearch-project/opensearch-neural-sparse-encoding-doc-v3-gte",
-        device: str = "cuda",
+        device: str = "cpu",
     ):
         self.model_name = model_name
         self.device = device
         self._model = None
 
-    @property
-    def model(self):
+    def load(self):
         if self._model is None:
             from sentence_transformers.sparse_encoder import SparseEncoder
 
@@ -40,6 +39,20 @@ class SparseEmbeddingModel(BaseEmbeddingModel):
                 model_kwargs={"code_revision": "40ced75c3017eb27626c9d4ea981bde21a2662f4"},
             )
         return self._model
+
+    def unload(self):
+        if self._model is not None:
+            import gc
+            import torch
+            del self._model
+            self._model = None
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+    @property
+    def model(self):
+        return self.load()
 
     @property
     def dimension(self) -> int:

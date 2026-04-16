@@ -59,10 +59,11 @@ class RAGPipeline:
         self.dense_model = dense_model or DenseEmbeddingModel(
             model_name=config.embedding.dense_model,
             device=config.embedding.device,
+            quantize_8bit=config.embedding.quantize_8bit,
         )
         self.sparse_model = sparse_model or SparseEmbeddingModel(
             model_name=config.embedding.sparse_model,
-            device=config.embedding.device,
+            device="cpu",  # Keep on CPU - fast enough for query, saves VRAM
         )
         self.storage = storage or MilvusClient(
             uri=config.storage.milvus_uri,
@@ -75,6 +76,7 @@ class RAGPipeline:
             reranker_model=config.retrieval.reranker_model,
             k=config.retrieval.k,
             hybrid_weight=config.retrieval.hybrid_weight,
+            reranker_quantize_8bit=config.retrieval.reranker_quantize_8bit,
         )
         self.llm = llm or LLM(
             endpoint=config.generation.llm_endpoint,
@@ -250,6 +252,9 @@ class RAGPipeline:
             f"Passing top-{rerank_top_k} reranked docs to LLM "
             f"(retrieved {len(docs)} total after RRF)"
         )
+
+        # Unload retriever models to free VRAM for the LLM
+        self.retriever.unload_models()
 
         # LLM.generate handles context formatting with Source [breadcrumb] markers
         result = self.llm.generate(

@@ -16,35 +16,55 @@ class DenseEmbeddingModel(BaseEmbeddingModel):
         model_name: str = "microsoft/harrier-oss-v1-0.6b",
         device: str = "cuda",
         query_prompt_name: str = "web_search_query",
+        quantize_8bit: bool = False,
     ):
         self.model_name = model_name
         self.device = device
         # prompt_name used for query encoding (instruction-tuned models need this).
         # Set to None to disable for standard bi-encoders like BGE.
         self.query_prompt_name = query_prompt_name
+        self.quantize_8bit = quantize_8bit
         self._model = None
         self._dim = None
 
-    @property
-    def model(self):
+    def load(self):
         if self._model is None:
             from sentence_transformers import SentenceTransformer
 
+            model_kwargs = {"dtype": "auto", "trust_remote_code": True}
+            if self.quantize_8bit:
+                model_kwargs["load_in_8bit"] = True
+
             self._model = SentenceTransformer(
                 self.model_name,
-                device=self.device,
-                model_kwargs={"dtype": "auto", "trust_remote_code": True},
+                device=self.device if not self.quantize_8bit else None,
+                model_kwargs=model_kwargs,
             )
         return self._model
+
+    def unload(self):
+        if self._model is not None:
+            import gc
+            import torch
+            del self._model
+            self._model = None
+            gc.collect()
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+
+    @property
+    def model(self):
+        return self.load()
 
     @property
     def dimension(self) -> int:
         if self._dim is None:
+            model = self.load()
             # get_sentence_embedding_dimension() was renamed in sentence-transformers 3.x
-            if hasattr(self.model, "get_embedding_dimension"):
-                self._dim = self.model.get_embedding_dimension()
+            if hasattr(model, "get_embedding_dimension"):
+                self._dim = model.get_embedding_dimension()
             else:
-                self._dim = self.model.get_sentence_embedding_dimension()
+                self._dim = model.get_sentence_embedding_dimension()
         return self._dim
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
