@@ -1,52 +1,43 @@
-# Handover Prompt: GPU Memory Optimization for RAG Retrieval Pipeline
+# Current System State Handover: Incremental Ingestion, Streaming, and File Management
 
-## Problem
-The current retrieval pipeline loads three models (dense, sparse, reranker) simultaneously on the same GPU, consuming approximately 8GB of VRAM. This leaves insufficient memory for a local LLM (e.g., Llama 3 8B requires ~16GB in FP16, but we can use quantization to reduce it to ~8GB, so we need to free up as much as possible).
+## 1. Latest Features (Implemented April 2026)
 
-## Goal
-Reduce the GPU memory footprint of the retrieval pipeline to under 4GB, allowing the local LLM to run on the same GPU.
+The RAG system has been upgraded with production-grade data management and user experience features:
 
-## Proposed Solutions
-1. **Lazy Loading and Model Offloading**:
-   - Load the dense model only when needed for query encoding, then move it to CPU.
-   - Load the reranker model only when needed for reranking, then move it to CPU.
-   - The sparse model's neural component is only required for document encoding (during ingestion). For query encoding, only the tokenizer and IDF table are needed (which are CPU-resident). Therefore, we can keep the sparse model on CPU at all times, or load it only during ingestion and then unload.
+- **Incremental Ingestion**:
+    - Uses **MD5 hashing** to detect file changes.
+    - State is tracked in `storage/ingestion_state.json`.
+    - Automatically deletes stale chunks from Milvus before updating modified files.
+- **Streaming Generation**:
+    - New `/query/stream` endpoint using **SSE (Server-Sent Events)**.
+    - Returns sources first, then a stream of tokens.
+- **File Upload API**:
+    - New `/ingestion/upload` endpoint for direct document uploads.
+    - Files are saved to the mounted `./uploads` directory and ingested in the background.
+- **Status Dashboard**:
+    - New `/ingestion/status` endpoint to see all indexed files and hashes.
 
-2. **8-bit Quantization**:
-   - Use 8-bit quantization for the dense and reranker models to reduce their memory footprint by approximately 50%.
-   - This can be done by setting `load_in_8bit=True` when loading the models with Hugging Face's `transformers` or `sentence_transformers`.
+## 2. Technical Decisions & Best Practices
 
-3. **Pre-compute Embeddings**:
-   - Since document embeddings are static, we can pre-compute and store the dense and sparse vectors for all documents during ingestion.
-   - At query time, we only need to compute the query's dense and sparse vectors (which are cheap) and then perform vector search in Milvus.
-   - This eliminates the need to keep the document encoding models in memory during retrieval.
+- **FileSystem + JSON State**: We chose a minimalist state management approach (local JSON) instead of a full SQL database to keep the Docker infrastructure lean and portable for research server use.
+- **Endpoint Protection**: New features were added as separate endpoints (`/query/stream`, `/ingestion/upload`) to ensure existing synchronous workflows were not disrupted.
+- **Dockerized Uploads**: Added a new volume mount for `./uploads` with Read-Write access.
+- **Robustness**: Proactively fixed `NameError` issues by ensuring `os` and `pathlib.Path` imports are present across core modules.
 
-## Implementation Plan
-Step 1: Modify the sparse model to run on CPU only (since its neural part is not needed for query encoding).
-Step 2: Implement lazy loading for the dense and reranker models in the retriever, with methods to load and unload.
-Step 3: Add 8-bit quantization options in the model loading configuration.
-Step 4: (Optional) Implement pre-compute embeddings for documents if not already done.
+## 3. GPU Memory Tracking (Persistent Context)
 
-## Expected Outcome
-After implementation, the retrieval pipeline should use approximately:
-   - Dense model (0.6B, 8-bit): ~0.6GB
-   - Sparse model (on CPU): ~0GB GPU
-   - Reranker (0.6B, 8-bit): ~0.6GB
-   - Total: ~1.2GB (plus overhead for activations and Milvus, aiming for under 2GB)
+The system continues to use **Lazy Loading** and **8-bit Quantization** to stay within the 8GB VRAM limit:
+- **Embedding Models**: Harrier (Dense) and OpenSearch (Sparse) are loaded on-demand.
+- **Reranker**: Jina-v3 is loaded/unloaded per query.
+- **LLM**: Typically runs in 4-bit/8-bit to share VRAM with the retrieval models.
 
-This leaves ample room for a quantized LLM (e.g., Llama 3 8B in 4-bit: ~4GB) on the same GPU.
+## 4. Verification & Testing
 
-## Files to Modify
-- `embedding/dense.py`: Add lazy loading and quantization.
-- `embedding/sparse.py`: Change to load on CPU by default, and only load the neural part during ingestion if needed.
-- `retrieval/retriever.py`: Implement lazy loading for dense and reranker models, and unload after use.
-- `config_rag.yaml`: Add configuration for quantization and device mapping.
+- **Test Script**: `scripts/test_upgrades.py` provides a unified way to test status, uploads, and streaming.
+- **Logs**: Ingestion progress can be monitored via `docker compose logs -f rag-api`. Unchanged files will be skipped with an explicit log message.
 
-## Testing
-- Verify that the retrieval results remain accurate after changes.
-- Measure GPU memory usage before and after each optimization.
-- Ensure that the local LLM can run without OOM errors.
+## 5. Next Steps for Future Agents
 
-## Notes
-- We must be cautious about the trade-off between memory savings and latency (loading models takes time). We may want to keep models loaded in a warm state if queries are frequent.
-- The sparse model's neural component is only used during ingestion, so we can load it on GPU only during ingestion and then unload.
+- **Frontend Integration**: Build a UI that consumes the new SSE stream and file upload endpoints.
+- **Deletions**: Currently, the system handles additions and modifications. Implementing a "clean-up" task for files deleted from the filesystem (but still in Milvus) is a potential future task.
+- **Semantic Routing**: Future plans include a semantic FAQ router to short-circuit the LLM for high-confidence queries.

@@ -72,7 +72,28 @@ For late-stage precision, we use a **Listwise Cross-Encoder Reranker**:
   - The system returns an explicit list of sources (breadcrumb, filename, page) used in the answer.
   - `<think>...</think>` tags from reasoning models (e.g., Qwen, DeepSeek) are automatically stripped.
 
-### F. Evaluation & Observability
+### F. Incremental Ingestion & State Management
+
+To avoid redundant processing and ensure index integrity, the system implements **Incremental Ingestion**:
+
+- **Content Change Detection**: Every file is hashed using **MD5**. The system compares the current file hash against a local registry before processing.
+- **State Registry**: A JSON file (`storage/ingestion_state.json`) tracks every ingested file, its hash, and the number of chunks generated.
+- **Deduplication**: 
+    - **UNCHANGED**: If hashes match, the file is skipped entirely.
+    - **MODIFIED**: If a hash changes, the system performs a `delete_by_source` operation in Milvus to remove stale chunks before re-indexing the new content.
+- **File Uploads**: A dedicated directory (`/app/uploads`) is mounted to the container to handle documents uploaded via the API, which are then queued for immediate ingestion.
+
+### G. Streaming Generation
+
+For a responsive user experience, the system supports real-time token streaming:
+
+- **Protocol**: Server-Sent Events (SSE).
+- **Format**:
+    - **Type: `sources`**: The first message sent contains the full list of retrieved document metadata.
+    - **Type: `token`**: Subsequent messages contain individual text tokens as they are emitted by the LLM.
+- **Implementation**: The pipeline uses the `stream=True` parameter in the OpenAI-compatible client, yielding chunks directly to the FastAPI `StreamingResponse`.
+
+### H. Evaluation & Observability
 
 - **Framework**: `RAGAS`.
 - **Metrics**: Faithfulness, Answer Relevance, Context Precision, and Context Recall.
@@ -108,6 +129,8 @@ All configuration is driven by `config_rag.yaml` (local) or `config_server.yaml`
 |---|---|---|---|
 | `ingestion` | `chunk_size` | `512` | Max tokens per chunk (Harrier tokenizer) |
 | `ingestion` | `pdf_parser` | `docling` | Parser for PDF files |
+| `ingestion` | `incremental` | `true` | Enable/disable MD5-based change detection |
+| `ingestion` | `state_path` | `storage/ingestion_state.json` | Path to the file tracking ingested documents |
 | `embedding` | `dense_model` | `microsoft/harrier-oss-v1-0.6b` | Dense embedding model |
 | `embedding` | `sparse_model` | `opensearch-project/opensearch-neural-sparse-encoding-doc-v3-gte` | Sparse model |
 | `embedding` | `batch_size` | `32` | Chunks per embedding forward pass |
@@ -147,6 +170,15 @@ The primary endpoint for retrieving context and generating answers.
   ```
 - **Response**: Returns the answer, combined context, and an array of source documents with breadcrumbs, filenames, and page numbers.
 
+### `POST /query/stream`
+Streaming version of the RAG query. Returns tokens as they are generated.
+- **Request Body**: Same as `/query`.
+- **Response**: SSE stream of JSON objects:
+  ```json
+  {"type": "sources", "content": [...]}
+  {"type": "token", "content": "Hello"}
+  ```
+
 ### `POST /ingest`
 Triggers a background ingestion process for a directory.
 - **Request Body**:
@@ -154,7 +186,16 @@ Triggers a background ingestion process for a directory.
   {"directory_path": "/app/data"}
   ```
 - **Response**: `{"status": "ingestion_started", "directory": "/app/data"}`
-- **Monitoring**: `docker compose logs -f rag-api`
+- **Incremental Logic**: If `ingestion.incremental` is true, it only processes new/modified files.
+
+### `POST /ingestion/upload`
+Uploads a single file (PDF/HTML) and triggers ingestion.
+- **Multipart Form**: `file` (the document to upload).
+- **Processing**: Saves to `/app/uploads` and runs the incremental ingestion loop.
+
+### `GET /ingestion/status`
+Returns a dashboard of all currently ingested files.
+- **Response**: List of file paths, MD5 hashes, and chunk counts.
 
 
 ### Interactive Docs
