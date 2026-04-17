@@ -73,12 +73,10 @@ class Retriever:
 
             model = AutoModel.from_pretrained(
                 self.reranker_model,
-                device_map=self.reranker_device if self.reranker_quantize_8bit else None,
+                device_map=self.reranker_device, # Direct loading to target GPU
                 **kwargs
             )
             model.eval()
-            if _has_cuda() and not self.reranker_quantize_8bit:
-                model = model.to(self.reranker_device)
             self._reranker = {"model": model}
         return self._reranker
 
