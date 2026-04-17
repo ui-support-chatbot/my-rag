@@ -60,12 +60,12 @@ class RAGPipeline:
         )
         self.dense_model = dense_model or DenseEmbeddingModel(
             model_name=config.embedding.dense_model,
-            device=config.embedding.device,
+            device=config.embedding.dense_device,
             quantize_8bit=config.embedding.quantize_8bit,
         )
         self.sparse_model = sparse_model or SparseEmbeddingModel(
             model_name=config.embedding.sparse_model,
-            device="cpu",  # Keep on CPU - fast enough for query, saves VRAM
+            device=config.embedding.sparse_device,
         )
         self.storage = storage or MilvusClient(
             uri=config.storage.milvus_uri,
@@ -79,6 +79,7 @@ class RAGPipeline:
             k=config.retrieval.k,
             hybrid_weight=config.retrieval.hybrid_weight,
             reranker_quantize_8bit=config.retrieval.reranker_quantize_8bit,
+            reranker_device=config.retrieval.reranker_device,
         )
         self.llm = llm or LLM(
             endpoint=config.generation.llm_endpoint,
@@ -208,6 +209,12 @@ class RAGPipeline:
                 doc_id=os.path.basename(source_path), # Use filename as id in state
                 chunk_count=count
             )
+
+        # ── 6. Memory Cleanup ────────────────────────────────────────────────
+        # Force unload models after heavy ingestion to free VRAM for LLM queries
+        logger.info("Ingestion complete. Unloading models to free VRAM...")
+        self.dense_model.unload()
+        self.sparse_model.unload()
 
         logger.info(f"Indexed {len(data)} chunks from {len(processed_sources)} files.")
         return len(data)

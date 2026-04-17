@@ -10,7 +10,9 @@ ingestion:
 embedding:
   dense_model: "microsoft/harrier-oss-v1-0.6b"
   sparse_model: "opensearch-project/opensearch-neural-sparse-encoding-doc-v3-gte"
-  device: "cuda"
+  device: "cuda:0"
+  dense_device: "cuda:0"
+  sparse_device: "cpu"
   batch_size: 1
   quantize_8bit: true
 
@@ -25,6 +27,7 @@ retrieval:
   rerank_top_k: 5               # Docs passed to the LLM after reranking
   hybrid_weight: 0.5
   reranker_model: "jinaai/jina-reranker-v3"
+  reranker_device: "cuda:1"
   min_score: 0.0
 
 generation:

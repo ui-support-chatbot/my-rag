@@ -37,7 +37,7 @@ class DenseEmbeddingModel(BaseEmbeddingModel):
 
             self._model = SentenceTransformer(
                 self.model_name,
-                device=self.device if not self.quantize_8bit else None,
+                device=self.device,
                 model_kwargs=model_kwargs,
             )
         return self._model

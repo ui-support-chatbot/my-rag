@@ -30,6 +30,7 @@ class Retriever:
         k: int = 50,
         hybrid_weight: float = 0.5,
         reranker_quantize_8bit: bool = False,
+        reranker_device: str = "cuda:1",
     ):
         self.dense_model = dense_model
         self.sparse_model = sparse_model
@@ -38,6 +39,7 @@ class Retriever:
         self.k = k
         self.hybrid_weight = hybrid_weight
         self.reranker_quantize_8bit = reranker_quantize_8bit
+        self.reranker_device = reranker_device
         self._reranker = None
         self.device = "cuda" if _has_cuda() else "cpu"
 
@@ -68,11 +70,12 @@ class Retriever:
 
             model = AutoModel.from_pretrained(
                 self.reranker_model,
+                device_map=self.reranker_device if self.reranker_quantize_8bit else None,
                 **kwargs
             )
             model.eval()
             if _has_cuda() and not self.reranker_quantize_8bit:
-                model = model.cuda()
+                model = model.to(self.reranker_device)
             self._reranker = {"model": model}
         return self._reranker
 
