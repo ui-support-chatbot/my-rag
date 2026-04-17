@@ -129,11 +129,10 @@ All configuration is driven by `config_rag.yaml` (local) or `config_server.yaml`
 |---|---|---|---|
 | `ingestion` | `chunk_size` | `512` | Max tokens per chunk (Harrier tokenizer) |
 | `ingestion` | `pdf_parser` | `docling` | Parser for PDF files |
-| `ingestion` | `incremental` | `true` | Enable/disable MD5-based change detection |
-| `ingestion` | `state_path` | `storage/ingestion_state.json` | Path to the file tracking ingested documents |
-| `embedding` | `dense_model` | `microsoft/harrier-oss-v1-0.6b` | Dense embedding model |
-| `embedding` | `sparse_model` | `opensearch-project/opensearch-neural-sparse-encoding-doc-v3-gte` | Sparse model |
-| `embedding` | `batch_size` | `32` | Chunks per embedding forward pass |
+| `embedding` | `device` | `cuda:0` | Default GPU for embedding models |
+| `embedding` | `dense_device` | `cuda:0` | Explicit GPU for Dense model |
+| `embedding` | `sparse_device` | `cpu` | Device for Sparse query encoding |
+| `retrieval` | `reranker_device` | `cuda:1` | Explicit GPU for the Reranker |
 | `retrieval` | `k` | `50` | Candidate pool size fetched from Milvus |
 | `retrieval` | `rerank_top_k` | `5` | Docs passed to the LLM after reranking |
 | `retrieval` | `reranker_model` | `jinaai/jina-reranker-v3` | Reranker model (set to `null` to disable) |
@@ -329,9 +328,14 @@ The following optimizations were implemented to stabilize the pipeline for produ
 - **Latency Impact**: This introduces a delay on every query (~5-10 seconds) because weights must be moved from Disk to GPU memory for every inference call.
 - **Optimization**: For faster performance on higher-end hardware (24GB+ VRAM), this behavior can be toggled by persistent model loading.
 
-### E. Unified Parsing (The Docling Shift)
-- **Problem**: Custom parsers (like Trafilatura) return flat strings. The `HybridChunker` requires a rich `DoclingDocument` object to recognize hierarchical headers and tables.
 - **Fix**: Centralized all parsing (PDF, HTML, DOCX) into the `Docling` `DocumentConverter`. This ensures every chunk retains its structural metadata (breadcrumbs) which is vital for the RAG reranking stage.
+
+### G. Multi-GPU Distribution Strategy
+To support 8GB VRAM cards alongside a local LLM, the system implements **Spatial Deconfliction**:
+- **GPU 0**: Dedicated to Dense Embedding (Harrier).
+- **GPU 1**: Dedicated to the Reranker (Jina-v3) and the LLM (Ollama/vLLM).
+- **CPU Offloading**: Sparse query encoding is forced to CPU to save VRAM for the dense reranking pass.
+- **Explicit Cleanup**: Both `query` and `ingest` methods call `torch.cuda.empty_cache()` immediately after use to ensure memory is available for the next stage or process.
 
 ---
 

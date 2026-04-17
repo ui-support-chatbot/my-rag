@@ -16,6 +16,10 @@ The RAG system has been upgraded with production-grade data management and user 
     - Files are saved to the mounted `./uploads` directory and ingested in the background.
 - **Status Dashboard**:
     - New `/ingestion/status` endpoint to see all indexed files and hashes.
+- **Multi-GPU Distribution**:
+    - Partitioned workload: **GPU 0** (Dense Embedding) and **GPU 1** (Reranker + LLM).
+    - Prevents "Peak OOM" by spreading components across 2x 8GB cards.
+    - Sparse models are offloaded to **CPU** for query-time inference.
 
 ## 2. Technical Decisions & Best Practices
 
@@ -26,10 +30,11 @@ The RAG system has been upgraded with production-grade data management and user 
 
 ## 3. GPU Memory Tracking (Persistent Context)
 
-The system continues to use **Lazy Loading** and **8-bit Quantization** to stay within the 8GB VRAM limit:
-- **Embedding Models**: Harrier (Dense) and OpenSearch (Sparse) are loaded on-demand.
-- **Reranker**: Jina-v3 is loaded/unloaded per query.
-- **LLM**: Typically runs in 4-bit/8-bit to share VRAM with the retrieval models.
+The system uses **Spatial Partitioning**, **Lazy Loading**, and **8-bit Quantization**:
+- **GPU 0**: Harrier (Dense) model.
+- **GPU 1**: Jina-v3 (Reranker) and Ollama/vLLM backend.
+- **Auto-Unload**: Both `query` and `ingest` methods call `unload_models()` to clear VRAM immediately after use.
+- **LLM**: Typically runs on GPU 1 to share VRAM with the reranker.
 
 ## 4. Verification & Testing
 
