@@ -30,8 +30,13 @@ class DenseEmbeddingModel(BaseEmbeddingModel):
     def load(self):
         if self._model is None:
             from sentence_transformers import SentenceTransformer
+            import torch
 
-            model_kwargs = {"dtype": "auto", "trust_remote_code": True}
+            model_kwargs = {
+                "trust_remote_code": True,
+                "torch_dtype": torch.float16,
+                "attn_implementation": "sdpa",
+            }
             if self.quantize_8bit:
                 model_kwargs["load_in_8bit"] = True
 

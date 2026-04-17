@@ -60,10 +60,13 @@ class Retriever:
         """Lazily load jina-reranker-v3 via AutoModel with trust_remote_code."""
         if self._reranker is None and self.reranker_model:
             from transformers import AutoModel
+            import torch
 
             kwargs = {
-                "dtype": "auto",
                 "trust_remote_code": True,
+                "torch_dtype": torch.float16,
+                "attn_implementation": "sdpa",
+                "low_cpu_mem_usage": True,
             }
             if self.reranker_quantize_8bit:
                 kwargs["load_in_8bit"] = True
