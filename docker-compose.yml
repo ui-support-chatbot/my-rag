@@ -73,6 +73,8 @@ services:
     build: .
     network_mode: host
     volumes:
+      # Live-code mount (Development best practice)
+      - .:/app:rw
       # Source documents (read-only)
       - ./data:/app/data:ro
       # Use the server config (Milvus URI points to the milvus container)

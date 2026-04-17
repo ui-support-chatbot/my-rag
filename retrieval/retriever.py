@@ -62,6 +62,7 @@ class Retriever:
             from transformers import AutoModel
             import torch
 
+            # High-speed loading logic
             kwargs = {
                 "trust_remote_code": True,
                 "torch_dtype": torch.float16,
@@ -70,14 +71,17 @@ class Retriever:
             if self.reranker_quantize_8bit:
                 kwargs["load_in_8bit"] = True
 
+            # Use the "Nuclear" map to force every sub-module onto GPU 1
             model = AutoModel.from_pretrained(
                 self.reranker_model,
+                device_map={"": self.reranker_device}, 
                 **kwargs
             )
             model.eval()
-            if torch.cuda.is_available():
-                model = model.to(self.reranker_device)
-                logger.info(f"Reranker model loaded to {self.reranker_device} (High Speed)")
+            
+            # Real-time check: find out where the model "brain" actually ended up
+            actual_device = next(model.parameters()).device
+            logger.info(f"Reranker model anchored to {actual_device} (Aggressive Map)")
             
             self._reranker = {"model": model}
         return self._reranker
