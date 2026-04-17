@@ -27,6 +27,7 @@ retrieval:
   rerank_top_k: 5               # Docs passed to the LLM after reranking
   hybrid_weight: 0.5
   reranker_model: "jinaai/jina-reranker-v3"
+  reranker_quantize_8bit: false
   reranker_device: "cuda:1"
   min_score: 0.0
 

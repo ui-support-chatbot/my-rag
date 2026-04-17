@@ -44,7 +44,7 @@ class RetrievalConfig:
 
     hybrid_weight: float = 0.5
     reranker_model: Optional[str] = "jinaai/jina-reranker-v3"
-    reranker_quantize_8bit: bool = True
+    reranker_quantize_8bit: bool = False
     reranker_device: str = "cuda:1"  # Put reranker on second GPU
     min_score: float = 0.0
 
