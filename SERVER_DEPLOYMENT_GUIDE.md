@@ -468,6 +468,7 @@ This section documents every production issue encountered on `riset-01` and its 
 |---------|-------|-----|
 | First query takes 2-5 minutes | Models downloading on first use | Mount `./storage/hf_cache` and wait for initial download to complete once |
 | Slow inference (minutes per query) | Ollama running on CPU, not GPU | `docker run --gpus all ollama/ollama` (see Section 9) |
+| **100% CPU during Reranking** | **Intensive Preprocessing** | **Expected Behavior.** Reranking 30+ documents with Jina-v3 requires heavy CPU tokenization and sequence building before the GPU math begins. This spikes all cores but is not an error. |
 | **100% CPU / Heavy Lag on 1080** | **Forcing float16 on Pascal GPU** | Revert to `dtype: torch.float32`. GTX 1080 cards have no FP16 hardware acceleration; they are 64x slower in float16 than in float32. ✅ |
 | Context Precision/Recall low | `k` (candidate pool) too small | Increase `retrieval.k` in config — proven optimal at `k=15` with this dataset |
 | **12GB allocation error** | **Qwen Global Mask bug** | Set `attn_implementation: "sdpa"`. This prevents the model from trying to allocate a massive mask for the 131k context window. ✅ |
