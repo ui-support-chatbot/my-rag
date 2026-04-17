@@ -81,6 +81,8 @@ services:
       - ./storage/hf_cache:/root/.cache/huggingface
       # Debugging: saved chunks before embedding (snapshots)
       - ./storage/snapshots:/app/storage/snapshots
+      # Uploads: directory for user-uploaded documents
+      - ./uploads:/app/uploads:rw
     environment:
       - RAG_CONFIG_PATH=/app/config_rag.yaml
       # Ollama and OpenAI-compatible endpoints require this var even with a dummy value

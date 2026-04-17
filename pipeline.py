@@ -21,6 +21,7 @@ from generation import LLM, DEFAULT_SYSTEM_PROMPT
 from evaluation import RAGASEvaluator
 from evaluation.synthetic_qa import SyntheticQAGenerator
 from debugging import ChunkInspector, RetrievalTracer
+from ingestion.state import IngestionState
 
 logger = logging.getLogger(__name__)
 
@@ -86,6 +87,9 @@ class RAGPipeline:
         )
         self.evaluator = None
         self.tracer = RetrievalTracer(self.retriever)
+        self.ingestion_state = IngestionState(
+            state_path=config.ingestion.state_path
+        )
 
     @classmethod
     def from_config(cls, config: RAGConfig) -> "RAGPipeline":
@@ -102,21 +106,48 @@ class RAGPipeline:
         directory: str = None,
         doc_id_prefix: str = "doc",
     ) -> int:
-        """Ingest documents into the vector store using batch embedding."""
+        """Ingest documents into the vector store using batch embedding (Incremental)."""
         collection_name = self.config.storage.collection_name
         self.storage.create_collection(collection_name, self.dense_model.dimension)
 
-        # ── 1. Parse & Chunk ──────────────────────────────────────────────────
-        chunks = []
+        # ── 1. Scopes & Filter ────────────────────────────────────────────────
+        all_file_paths = []
         if paths:
-            for i, path in enumerate(paths):
-                doc_id = f"{doc_id_prefix}_{i:03d}"
+            all_file_paths.extend(paths)
+        if directory:
+            for root, _, files in os.walk(directory):
+                for file in files:
+                    if any(file.endswith(ext) for ext in [".pdf", ".html", ".htm"]):
+                        all_file_paths.append(os.path.join(root, file))
+
+        # Filter out unchanged files if incremental is enabled
+        files_to_process = []
+        if self.config.ingestion.incremental:
+            for path in all_file_paths:
+                status = self.ingestion_state.get_file_status(path)
+                if status == "unchanged":
+                    logger.info(f"Skipping {path}: No changes detected (Incremental)")
+                else:
+                    if status == "modified":
+                        logger.info(f"File modified: {path}. Old chunks will be replaced.")
+                        self.storage.delete_by_source(collection_name, path)
+                    files_to_process.append(path)
+        else:
+            files_to_process = all_file_paths
+
+        if not files_to_process:
+            logger.info("Nothing to ingest. Everything is up to date.")
+            return 0
+
+        # ── 2. Parse & Chunk ──────────────────────────────────────────────────
+        chunks = []
+        for i, path in enumerate(files_to_process):
+            doc_id = f"{doc_id_prefix}_{i:03d}"
+            try:
                 file_chunks = self.ingestion.process_file(path, doc_id=doc_id)
                 chunks.extend(file_chunks)
-
-        if directory:
-            dir_chunks = self.ingestion.process_directory(directory)
-            chunks.extend(dir_chunks)
+            except Exception as e:
+                logger.error(f"Failed to process {path}: {e}")
 
         if not chunks:
             logger.warning("No chunks produced — nothing to index.")
@@ -126,27 +157,25 @@ class RAGPipeline:
         if self.config.ingestion.save_snapshots:
             self.save_chunks_before_embedding(chunks=chunks, output_prefix=f"ingest_{doc_id_prefix}")
 
-        # ── 2. Batch Embed (one forward pass per model, not one per chunk) ───
-        # This is 10-30× faster than embedding chunk-by-chunk in a loop.
+        # ── 3. Batch Embed ────────────────────────────────────────────────────
         texts = [c.text for c in chunks]
         batch_size = self.config.embedding.batch_size
 
         logger.info(f"Embedding {len(texts)} chunks (batch_size={batch_size}) ...")
 
-        # Dense: plain encoding, no instruction prompt
         all_dense = []
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
             all_dense.extend(self.dense_model.embed_documents(batch))
 
-        # Sparse: full neural model for documents
         all_sparse = []
         for i in range(0, len(texts), batch_size):
             batch = texts[i : i + batch_size]
             all_sparse.extend(self.sparse_model.embed_documents(batch))
 
-        # ── 3. Build records & Insert ─────────────────────────────────────────
+        # ── 4. Build records & Insert ─────────────────────────────────────────
         data = []
+        processed_sources = set()
         for chunk, dense_emb, sparse_emb in zip(chunks, all_dense, all_sparse):
             record = {
                 "doc_id": chunk.doc_id,
@@ -159,13 +188,27 @@ class RAGPipeline:
                 "source": chunk.filename,
                 "source_url": chunk.metadata.get("source_url", ""),
             }
-            # Add all other metadata fields
             record.update(chunk.metadata)
             data.append(record)
+            processed_sources.add(chunk.filename)
 
         self.storage.insert(collection_name, data)
-        logger.info(f"Indexed {len(data)} chunks into '{collection_name}'")
+        
+        # ── 5. Update State ──────────────────────────────────────────────────
+        # Update ingestion state for all successfully processed files
+        # We group chunks by filename to count them
+        source_counts = {}
+        for chunk in chunks:
+            source_counts[chunk.filename] = source_counts.get(chunk.filename, 0) + 1
+        
+        for source_path, count in source_counts.items():
+            self.ingestion_state.update_file(
+                file_path=source_path,
+                doc_id=os.path.basename(source_path), # Use filename as id in state
+                chunk_count=count
+            )
 
+        logger.info(f"Indexed {len(data)} chunks from {len(processed_sources)} files.")
         return len(data)
 
     def save_chunks_before_embedding(
@@ -273,6 +316,44 @@ class RAGPipeline:
             sources=result.sources,
             metadata={"query": query, "num_docs": len(docs)},
         )
+
+    def query_stream(
+        self,
+        query: str,
+        doc_ids: Optional[List[str]] = None,
+        metadata_filter: Optional[Dict] = None,
+        k: Optional[int] = None,
+    ):
+        """Streaming version of the RAG pipeline query."""
+        docs = self.retriever.retrieve(
+            query=query,
+            collection_name=self.config.storage.collection_name,
+            doc_ids=doc_ids,
+            metadata_filter=metadata_filter,
+            k=k or self.config.retrieval.k,
+        )
+
+        rerank_top_k = self.config.retrieval.rerank_top_k
+        docs = docs[:rerank_top_k]
+        
+        self.retriever.unload_models()
+
+        # Yield a special "metadata" chunk first to provide sources
+        sources = [
+            {
+                "breadcrumb": doc.metadata.get("breadcrumb", "Unknown"),
+                "filename": doc.metadata.get("source", "Unknown"),
+                "page": doc.metadata.get("page_number", "Unknown"),
+                "url": doc.metadata.get("source_url"),
+            }
+            for doc in docs
+        ]
+        
+        yield json.dumps({"type": "sources", "content": sources}) + "\n"
+
+        # Stream the LLM response
+        for token in self.llm.generate_stream(prompt=query, retrieved_docs=docs):
+            yield json.dumps({"type": "token", "content": token}) + "\n"
 
     def query_with_keyword_check(
         self,

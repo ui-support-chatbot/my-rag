@@ -64,6 +64,14 @@ class MilvusClient:
     def insert(self, collection_name: str, data: List[Dict]) -> Any:
         return self._client.insert(collection_name=collection_name, data=data)
 
+    def delete_by_source(self, collection_name: str, source_path: str) -> Any:
+        """Delete all chunks associated with a specific source path."""
+        # Clean up path to ensure match (absolute vs relative depends on how it was stored)
+        # We store the path precisely as it was provided during ingestion.
+        filter_expr = f'source == "{source_path}"'
+        logger.info(f"Deleting existing chunks for source: {source_path}")
+        return self._client.delete(collection_name=collection_name, filter=filter_expr)
+
     def query(
         self,
         collection_name: str,

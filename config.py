@@ -9,7 +9,10 @@ class IngestionConfig:
     chunking_strategy: str = "fixed"
     pdf_parser: str = "docling"
     html_parser: str = "trafilatura"
-    save_snapshots: bool = False  # Set to True to save JSON snapshots of chunks before embedding
+    save_snapshots: bool = False
+    incremental: bool = True
+    state_path: str = "storage/ingestion_state.json"
+    upload_dir: str = "uploads"
 
 
 @dataclass

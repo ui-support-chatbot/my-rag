@@ -1,5 +1,6 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, BackgroundTasks
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import os
@@ -198,6 +199,16 @@ async def list_collections():
         raise HTTPException(status_code=500, detail=str(e))
 
 
+@app.get("/ingestion/status", summary="Get ingestion status of all files")
+async def ingestion_status():
+    """Returns the list of files currently ingested with their metadata."""
+    if not rag_pipeline:
+        raise HTTPException(status_code=503, detail="RAG Pipeline not initialized")
+    
+    files = rag_pipeline.ingestion_state.get_all_ingested()
+    return {"ingested_files": files, "count": len(files)}
+
+
 @app.post("/query", response_model=RAGResponse, summary="Run a RAG query")
 async def query_rag(request: QueryRequest):
     """
@@ -223,6 +234,21 @@ async def query_rag(request: QueryRequest):
     except Exception as e:
         logger.error(f"Query failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/query/stream", summary="Run a RAG query with token streaming")
+async def query_rag_stream(request: QueryRequest):
+    """
+    Streaming version of the RAG query. 
+    Returns an SSE stream of JSON objects (type: 'sources' or 'token').
+    """
+    if not rag_pipeline:
+        raise HTTPException(status_code=503, detail="RAG Pipeline not initialized")
+
+    return StreamingResponse(
+        rag_pipeline.query_stream(request.query, metadata_filter=request.metadata_filter),
+        media_type="text/event-stream"
+    )
 
 
 def _background_ingestion(directory: str) -> None:
@@ -258,6 +284,43 @@ async def ingest_data(request: IngestRequest, background_tasks: BackgroundTasks)
         "status": "ingestion_started",
         "directory": request.directory_path,
         "message": "Check container logs for progress.",
+    }
+
+
+@app.post("/ingestion/upload", summary="Upload and ingest a document")
+async def upload_document(
+    background_tasks: BackgroundTasks,
+    file: UploadFile = File(...)
+):
+    """
+    Upload a single PDF or HTML file and trigger ingestion.
+    Files are stored in the /app/uploads directory.
+    """
+    if not rag_pipeline:
+        raise HTTPException(status_code=503, detail="RAG Pipeline not initialized")
+
+    # Ensure upload directory exists
+    upload_dir = Path("/app/uploads")
+    upload_dir.mkdir(parents=True, exist_ok=True)
+
+    file_path = upload_dir / file.filename
+    
+    # Save the file
+    try:
+        with open(file_path, "wb") as f:
+            f.write(await file.read())
+        logger.info(f"File uploaded: {file_path}")
+    except Exception as e:
+        logger.error(f"Failed to save upload: {e}")
+        raise HTTPException(status_code=500, detail=f"Upload failed: {e}")
+
+    # Trigger ingestion for this specific file
+    background_tasks.add_task(_background_ingestion, str(file_path))
+
+    return {
+        "status": "upload_success",
+        "filename": file.filename,
+        "message": "Ingestion triggered in background."
     }
 
 
