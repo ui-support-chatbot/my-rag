@@ -381,7 +381,15 @@ docker run -d --name ollama \
 > [!TIP]
 > You can check GPU utilization during a query with `nvidia-smi` on the host.
 
----
+### 9.1 Hardware Optimization for Pascal (GTX 1080)
+If deploying on GTX 1080/1070 (Pascal Architecture), use these specific rules found during testing:
+
+1. **Use FP32, not FP16**: These older cards do not have Tensor Cores. Forcing `float16` will cause the GPU to emulate the math, spiking CPU to 100% and making inference 10x slower.
+2. **SDPA is Mandatory**: Standard attention with Jina-v3 will try to allocate ~12.29 GB of VRAM for its attention mask. Using `attn_implementation="sdpa"` in `retriever.py` and `dense.py` bypasses this bug.
+3. **Partitioned Workload**:
+    * **GPU 0**: Handles the "light" embedding models (Dense + Sparse).
+    * **GPU 1**: Handles the "heavy" models (Reranker + LLM/Ollama).
+    This ensures that the card running the 7B LLM has the maximum possible breathing room.
 
 ## 10. Persistence & Data Management
 
@@ -460,7 +468,9 @@ This section documents every production issue encountered on `riset-01` and its 
 |---------|-------|-----|
 | First query takes 2-5 minutes | Models downloading on first use | Mount `./storage/hf_cache` and wait for initial download to complete once |
 | Slow inference (minutes per query) | Ollama running on CPU, not GPU | `docker run --gpus all ollama/ollama` (see Section 9) |
+| **100% CPU / Heavy Lag on 1080** | **Forcing float16 on Pascal GPU** | Revert to `dtype: torch.float32`. GTX 1080 cards have no FP16 hardware acceleration; they are 64x slower in float16 than in float32. ✅ |
 | Context Precision/Recall low | `k` (candidate pool) too small | Increase `retrieval.k` in config — proven optimal at `k=15` with this dataset |
+| **12GB allocation error** | **Qwen Global Mask bug** | Set `attn_implementation: "sdpa"`. This prevents the model from trying to allocate a massive mask for the 131k context window. ✅ |
 
 ### Deleting root-owned files created by containers
 

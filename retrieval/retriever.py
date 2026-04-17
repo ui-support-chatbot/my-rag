@@ -62,10 +62,9 @@ class Retriever:
             from transformers import AutoModel
             import torch
 
-            # High-speed loading logic
             kwargs = {
                 "trust_remote_code": True,
-                "torch_dtype": torch.float16,
+                "dtype": torch.float32,
                 "attn_implementation": "sdpa",
             }
             if self.reranker_quantize_8bit:

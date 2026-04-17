@@ -34,7 +34,7 @@ class DenseEmbeddingModel(BaseEmbeddingModel):
 
             model_kwargs = {
                 "trust_remote_code": True,
-                "torch_dtype": torch.float16,
+                "dtype": torch.float32,
                 "attn_implementation": "sdpa",
             }
             if self.quantize_8bit:
