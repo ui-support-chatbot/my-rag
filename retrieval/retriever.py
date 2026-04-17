@@ -66,17 +66,19 @@ class Retriever:
                 "trust_remote_code": True,
                 "torch_dtype": torch.float16,
                 "attn_implementation": "sdpa",
-                "low_cpu_mem_usage": True,
             }
             if self.reranker_quantize_8bit:
                 kwargs["load_in_8bit"] = True
 
             model = AutoModel.from_pretrained(
                 self.reranker_model,
-                device_map=self.reranker_device, # Direct loading to target GPU
                 **kwargs
             )
             model.eval()
+            if torch.cuda.is_available():
+                model = model.to(self.reranker_device)
+                logger.info(f"Reranker model loaded to {self.reranker_device} (High Speed)")
+            
             self._reranker = {"model": model}
         return self._reranker
 

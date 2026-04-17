@@ -36,7 +36,6 @@ class DenseEmbeddingModel(BaseEmbeddingModel):
                 "trust_remote_code": True,
                 "torch_dtype": torch.float16,
                 "attn_implementation": "sdpa",
-                "device_map": self.device, # Direct to GPU
             }
             if self.quantize_8bit:
                 model_kwargs["load_in_8bit"] = True
