@@ -23,7 +23,7 @@ storage:
   metric_type: "COSINE"
 
 retrieval:
-  k: 8                         # Candidate pool fetched from Milvus before reranking
+  k: 15                         # Candidate pool fetched from Milvus before reranking
   rerank_top_k: 5               # Docs passed to the LLM after reranking
   hybrid_weight: 0.5
   reranker_model: "jinaai/jina-reranker-v3-GGUF:Q5_K_M"
