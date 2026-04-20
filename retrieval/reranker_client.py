@@ -3,6 +3,7 @@ import logging
 from typing import List, Dict, Any, Optional
 from urllib import request as urlrequest
 from urllib.error import HTTPError, URLError
+import time
 
 logger = logging.getLogger(__name__)
 
@@ -14,10 +15,19 @@ class LlamaServerReranker:
     See llama.cpp docs for the /reranking, /rerank, /v1/rerank aliases.
     """
 
-    def __init__(self, endpoint: str, model: Optional[str] = None, timeout: int = 120):
+    def __init__(
+        self,
+        endpoint: str,
+        model: Optional[str] = None,
+        timeout: int = 120,
+        retries: int = 3,
+        retry_delay: float = 1.0,
+    ):
         self.endpoint = endpoint.rstrip("/")
         self.model = model
         self.timeout = timeout
+        self.retries = retries
+        self.retry_delay = retry_delay
 
     def rerank(self, query: str, documents: List[str]) -> List[Dict[str, Any]]:
         if not self.endpoint:
@@ -41,12 +51,25 @@ class LlamaServerReranker:
             method="POST",
         )
 
-        try:
-            with urlrequest.urlopen(req, timeout=self.timeout) as resp:
-                raw = resp.read().decode("utf-8")
-        except (HTTPError, URLError, TimeoutError, ValueError) as exc:
-            logger.error("Reranker request failed: %s", exc)
-            raise
+        last_exc: Exception | None = None
+        for attempt in range(1, self.retries + 1):
+            try:
+                with urlrequest.urlopen(req, timeout=self.timeout) as resp:
+                    raw = resp.read().decode("utf-8")
+                break
+            except (HTTPError, URLError, TimeoutError, ValueError) as exc:
+                last_exc = exc
+                logger.warning(
+                    "Reranker request attempt %s/%s failed: %s",
+                    attempt,
+                    self.retries,
+                    exc,
+                )
+                if attempt < self.retries:
+                    time.sleep(self.retry_delay)
+        else:
+            assert last_exc is not None
+            raise last_exc
 
         data = json.loads(raw)
         if isinstance(data, list):
