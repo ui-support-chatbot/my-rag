@@ -26,7 +26,7 @@ retrieval:
   k: 15                         # Candidate pool fetched from Milvus before reranking
   rerank_top_k: 5               # Docs passed to the LLM after reranking
   hybrid_weight: 0.5
-  reranker_model: null
+  reranker_model: "jinaai/jina-reranker-v3-GGUF:Q5_K_M"
   reranker_endpoint: "http://127.0.0.1:8012/v1/rerank"
   min_score: 0.0
 

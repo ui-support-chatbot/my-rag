@@ -203,6 +203,11 @@ class Retriever:
 
         model = self.reranker
         doc_texts = [d.text for d in docs]
+        logger.info(
+            "Sending %d candidates to reranker at %s",
+            len(doc_texts),
+            getattr(model, "endpoint", "unknown"),
+        )
         try:
             results = model.rerank(query, doc_texts)
         except Exception as exc:
@@ -222,6 +227,7 @@ class Retriever:
             )
             reranked.append(original_doc)
 
+        logger.info("Reranking completed for %d candidates", len(reranked))
         return reranked
 
     def find_chunks_with_keyword(

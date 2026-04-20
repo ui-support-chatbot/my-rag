@@ -44,6 +44,11 @@ class LlamaServerReranker:
             payload["model"] = self.model
 
         body = json.dumps(payload).encode("utf-8")
+        logger.info(
+            "Calling reranker endpoint %s with %d documents",
+            self.endpoint,
+            len(documents),
+        )
         req = urlrequest.Request(
             self.endpoint,
             data=body,
@@ -96,4 +101,5 @@ class LlamaServerReranker:
                 )
 
         normalized.sort(key=lambda item: item["relevance_score"], reverse=True)
+        logger.info("Reranker returned %d ranked documents", len(normalized))
         return normalized[: len(documents)]
