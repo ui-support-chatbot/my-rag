@@ -203,7 +203,14 @@ class Retriever:
 
         model = self.reranker
         doc_texts = [d.text for d in docs]
-        results = model.rerank(query, doc_texts)
+        try:
+            results = model.rerank(query, doc_texts)
+        except Exception as exc:
+            logger.warning(
+                "Reranker unavailable, returning RRF order for this query: %s",
+                exc,
+            )
+            return docs
 
         reranked = []
         for i, res in enumerate(results):

@@ -144,6 +144,9 @@ services:
       - -ngl
       - all
       - --no-webui
+    pids_limit: -1
+    security_opt:
+      - seccomp:unconfined
     deploy:
       resources:
         reservations:
