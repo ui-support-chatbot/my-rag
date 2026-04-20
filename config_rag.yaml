@@ -2,7 +2,7 @@
 
 # Ingestion settings
 ingestion:
-  chunk_size: 512
+  chunk_size: 8000
   chunk_overlap: 50
   chunking_strategy: "fixed"  # or "semantic"
   pdf_parser: "docling"
@@ -25,7 +25,7 @@ storage:
 
 # Retrieval settings
 retrieval:
-  k: 50                         # Candidate pool fetched from Milvus before reranking
+  k: 8                         # Candidate pool fetched from Milvus before reranking
   rerank_top_k: 5               # Docs passed to the LLM after reranking (prevents token overflow)
   hybrid_weight: 0.5
   reranker_model: null  # Set to null to disable

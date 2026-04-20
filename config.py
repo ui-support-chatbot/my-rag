@@ -4,7 +4,7 @@ from typing import List, Optional
 
 @dataclass
 class IngestionConfig:
-    chunk_size: int = 512
+    chunk_size: int = 8000
     chunk_overlap: int = 50
     chunking_strategy: str = "fixed"
     pdf_parser: str = "docling"
@@ -36,7 +36,7 @@ class StorageConfig:
 
 @dataclass
 class RetrievalConfig:
-    k: int = 50
+    k: int = 8
     """Candidate pool size fetched from Milvus before reranking."""
 
     rerank_top_k: int = 5
