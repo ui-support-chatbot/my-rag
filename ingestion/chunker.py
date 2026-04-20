@@ -19,6 +19,9 @@ class Chunker:
     ):
         from docling.chunking import HierarchicalChunker
 
+        # TODO: The HierarchicalChunker currently ignores chunk_size and chunk_overlap.
+        # It relies strictly on document structure (headings, etc.).
+        # Fix planned: Initialize with HuggingFaceTokenizer and max_tokens.
         self.chunker = HierarchicalChunker()
 
     def chunk(self, docling_doc, filename: str, doc_id: str = "", external_metadata: dict = None) -> List[ChunkRecord]:

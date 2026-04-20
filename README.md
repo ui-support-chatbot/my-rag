@@ -59,3 +59,9 @@ python src/my_rag/cli.py eval --config config_rag.yaml --synthetic --paths ./dat
 - `generation/`: LLM interface and prompt templates.
 - `evaluation/`: RAGAS metrics and synthetic data generation.
 - `debugging/`: Tools for tracing and inspecting chunks.
+
+## Known Limitations
+
+- **Chunker Config**: The `chunk_size` and `chunk_overlap` settings in the YAML files are currently ignored by the `HierarchicalChunker` implementation in favor of structural boundaries. This is planned for a future update.
+- **VRAM Competition**: Running long-context reranking (8k tokens) on consumer GPUs alongside a large LLM may require careful GPU allocation.
+

@@ -354,3 +354,25 @@ To improve performance, reduce LLM costs, and ensure 100% accuracy for strictly 
    - **Threshold Match (> 0.90)**: The semantic router SHORT-CIRCUITS the pipeline. The verified answer is returned instantly (~0.1s latency). No chunks are fetched, Jina is not invoked, and the generation LLM is completely bypassed.
    - **Fallback (< 0.90)**: The query proceeds through the normal Dual-Routing architecture (Dense + Sparse → RRF → Reranker → LLM).
 3. **Automated Bootstrapping**: Utilizing the existing `SyntheticQAGenerator` module to crawl regulatory PDFs, generate anticipated Q&A pairs, and stage them for human review before insertion into the `faq_collection`.
+
+---
+
+## 11. Known Issues & Configuration Discrepancies
+
+As of April 2026, there are several areas where the configuration files (`config_rag.yaml`, `config_server.yaml`) do not yet fully connect to the underlying implementation. These are tracked as critical technical debt:
+
+### A. Chunker Configuration (`chunk_size` & `chunk_overlap`)
+- **Issue**: The `HierarchicalChunker` (based on Docling) in `ingestion/chunker.py` currently ignores the `chunk_size` and `chunk_overlap` parameters passed to its constructor.
+- **Impact**: Changing `chunk_size` in your YAML files will not actually change the size of the chunks generated during ingestion. The chunker currently relies strictly on document structural boundaries (headings, paragraphs).
+- **Planned Fix**: Initialize the `HierarchicalChunker` with a `HuggingFaceTokenizer` and a `max_tokens` constraint to bridge this gap.
+
+### B. Embedding Model Context Limits
+- **Issue**: Most embedding models (Dense and Sparse) have internal token limits (typically 512 or 8192). 
+- **Impact**: If you manually set a very large `chunk_size` (e.g., 8,000) that the embedding model cannot handle, the model will truncate the text before generating the vector. This means the "middle" and "end" of your 8,000-token chunk will not be searchable.
+- **Verification**: Always cross-reference your `chunk_size` with the `max_seq_length` of your dense/sparse models.
+
+### C. Reranker Context vs. Server Context
+- **Issue**: The reranker model supports 8,192 tokens, but the `llama.cpp` server defaults to a smaller context window if not explicitly overridden. 
+- **Impact**: Even if your chunks are 8k tokens, the reranker might only "see" the first 512 of them.
+- **Fix**: The `-c 8192` flag in `docker-compose.yml` addresses this.
+

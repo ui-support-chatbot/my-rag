@@ -5,20 +5,6 @@ from typing import List, Optional
 @dataclass
 class IngestionConfig:
     chunk_size: int = 8000
-    chunk_overlap: int = 50
-    chunking_strategy: str = "fixed"
-    pdf_parser: str = "docling"
-    html_parser: str = "trafilatura"
-    save_snapshots: bool = False
-    incremental: bool = True
-    state_path: str = "storage/ingestion_state.json"
-    upload_dir: str = "uploads"
-
-
-@dataclass
-class EmbeddingConfig:
-    dense_model: str = "microsoft/harrier-oss-v1-0.6b"
-    sparse_model: str = "opensearch-project/opensearch-neural-sparse-encoding-doc-v3-gte"
     device: str = "cuda"  # Multi-GPU: This is the default for Dense
     dense_device: str = "cuda:0"
     sparse_device: str = "cpu"  # Sparse query is fast on CPU
