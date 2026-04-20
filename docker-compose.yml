@@ -144,6 +144,8 @@ services:
       - -ngl
       - all
       - --no-webui
+      - -lv
+      - "4"
     pids_limit: -1
     security_opt:
       - seccomp:unconfined

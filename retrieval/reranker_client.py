@@ -40,8 +40,6 @@ class LlamaServerReranker:
             "documents": documents,
             "top_n": len(documents),
         }
-        if self.model:
-            payload["model"] = self.model
 
         body = json.dumps(payload).encode("utf-8")
         logger.info(
@@ -64,6 +62,16 @@ class LlamaServerReranker:
                 break
             except (HTTPError, URLError, TimeoutError, ValueError) as exc:
                 last_exc = exc
+                if isinstance(exc, HTTPError):
+                    try:
+                        error_body = exc.read().decode("utf-8", errors="replace")
+                    except Exception:
+                        error_body = "<unreadable>"
+                    logger.warning(
+                        "Reranker HTTP %s body: %s",
+                        exc.code,
+                        error_body[:2000],
+                    )
                 logger.warning(
                     "Reranker request attempt %s/%s failed: %s",
                     attempt,
