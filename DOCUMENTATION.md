@@ -59,9 +59,11 @@ score(d) = Σ  1 / (k + rank_i)
 
 For late-stage precision, we use a **Listwise Cross-Encoder Reranker**:
 
-- **Model**: `jinaai/jina-reranker-v3`. A 0.6B parameter multilingual listwise reranker built on Qwen3-0.6B with a "last but not late" interaction architecture. It processes up to 64 documents simultaneously within a 131K token context window.
+- **Model**: `jinaai/jina-reranker-v3-GGUF:Q5_K_M` served through llama.cpp. This keeps the reranker on-GPU while cutting VRAM compared with the full FP32 transformer path.
 - **Process**: The retriever fetches a wide candidate pool (Top-50). The reranker performs a deep pairwise comparison between the query and each candidate, re-sorting them by semantic relevance.
 - **Top-K Slicing**: After reranking, only the top `rerank_top_k` documents (default: 5) are passed to the LLM. This prevents token-window overflow while ensuring the LLM receives the highest-quality context.
+- **Why this is the memory hotspot**: the reranker is listwise and long-context. VRAM usage is dominated by the total query + chunk tokens, attention buffers, and activations, not just the 0.6B parameter count. On GTX 1080-class GPUs, the current FP32 transformer path can easily reach multi-GB usage per query.
+- **What changed**: dense/sparse embeddings are loaded once and kept resident. The reranker is no longer loaded in-process; it is a dedicated llama.cpp service over HTTP.
 
 ### E. Generation
 
@@ -132,10 +134,10 @@ All configuration is driven by `config_rag.yaml` (local) or `config_server.yaml`
 | `embedding` | `device` | `cuda:0` | Default GPU for embedding models |
 | `embedding` | `dense_device` | `cuda:0` | Explicit GPU for Dense model |
 | `embedding` | `sparse_device` | `cpu` | Device for Sparse query encoding |
-| `retrieval` | `reranker_device` | `cuda:1` | Explicit GPU for the Reranker |
+| `retrieval` | `reranker_endpoint` | `http://127.0.0.1:8012/v1/rerank` | llama.cpp reranking endpoint |
 | `retrieval` | `k` | `50` | Candidate pool size fetched from Milvus |
 | `retrieval` | `rerank_top_k` | `5` | Docs passed to the LLM after reranking |
-| `retrieval` | `reranker_model` | `jinaai/jina-reranker-v3` | Reranker model (set to `null` to disable) |
+| `retrieval` | `reranker_model` | `jinaai/jina-reranker-v3-GGUF:Q5_K_M` | Reranker model name/path used by llama.cpp |
 | `generation` | `llm_endpoint` | `http://localhost:8000/v1` | OpenAI-compatible LLM endpoint |
 | `generation` | `model_name` | `llama-3-8b` | Model served by vLLM/Ollama |
 
@@ -312,30 +314,30 @@ The following optimizations were implemented to stabilize the pipeline for produ
 | **Issue** | **Root Cause** | **Resolution** |
 |---|---|---|
 | `CUDA out of memory` during ingestion | SPLADE model vocabulary expansion (30k dims) is too large for batch size 32 | Lower `batch_size` to `16` or `4` in `config_server.yaml` ✅ |
-| **Increased Query Latency** | Lazy loading/unloading of models to save VRAM | This is a known trade-off to allow the LLM and RAG models to share a single GPU. Models are loaded on-demand and unloaded after retrieval. ✅ |
+| **Increased Query Latency** | Model reload churn to save VRAM | This is no longer used. Dense/sparse embeddings stay loaded, and the reranker is a separate service. ✅ |
 
 ### D. GPU Memory Competition Issue
-- **Problem**: When running the RAG system in Docker with GPU access, the RAG embedding models (Harrier, OpenSearch, Jina-reranker) compete for GPU memory with the LLM backend (Ollama). The nvidia-smi output shows multiple processes consuming GPU memory: Ollama (5.47 GiB) and the RAG Python process (2.55 GiB), leading to CUDA OOM errors.
+- **Problem**: When running the RAG system in Docker with GPU access, the reranker alone can consume most of GPU 1. In older deployments, Ollama could also compete for VRAM, but the reranker is the stage that explains the 7 GB spike you observed.
 - **Solution**:
   1. **GPU Isolation**: Assign separate GPUs for embedding/reranking vs LLM inference in docker-compose.yml:
      - GPU 0: Embedding models (Harrier, OpenSearch sparse)
-     - GPU 1: Reranker model (Jina-v3) and LLM
-  2. **Memory Management**: Add explicit torch.cuda.empty_cache() calls after intensive operations
-  3. **Environment Variable**: Set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to reduce memory fragmentation
+     - GPU 1: Dedicated GGUF reranker service
+  2. **Memory Management**: Keep embeddings resident; remove unload/reload churn
+  3. **Environment Variable**: Set PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True only if you still see fragmentation in other GPU workloads
 
-### F. Lazy Loading & Model Offloading (Latency Trade-off)
-- **Mechanism**: To stay within the 8GB VRAM limit while running a local LLM, the RAG pipeline uses **Lazy Loading**. The Embedding and Reranker models are loaded into VRAM only when needed and explicitly unloaded after the retrieval stage.
-- **Latency Impact**: This introduces a delay on every query (~5-10 seconds) because weights must be moved from Disk to GPU memory for every inference call.
-- **Optimization**: For faster performance on higher-end hardware (24GB+ VRAM), this behavior can be toggled by persistent model loading.
+### F. Persistent Models
+- **Mechanism**: Dense and sparse embedding models are loaded at startup and stay resident for the lifetime of the process.
+- **Latency Impact**: Query latency is lower because there is no unload/reload churn between requests.
+- **Optimization**: The reranker is the only remaining memory-sensitive stage; run it as a dedicated GGUF service.
 
 - **Fix**: Centralized all parsing (PDF, HTML, DOCX) into the `Docling` `DocumentConverter`. This ensures every chunk retains its structural metadata (breadcrumbs) which is vital for the RAG reranking stage.
 
 ### G. Multi-GPU Distribution Strategy
 To support 8GB VRAM cards alongside a local LLM, the system implements **Spatial Deconfliction**:
 - **GPU 0**: Dedicated to Dense Embedding (Harrier).
-- **GPU 1**: Dedicated to the Reranker (Jina-v3) and the LLM (Ollama/vLLM).
+- **GPU 1**: Dedicated to the GGUF reranker service.
 - **CPU Offloading**: Sparse query encoding is forced to CPU to save VRAM for the dense reranking pass.
-- **Explicit Cleanup**: Both `query` and `ingest` methods call `torch.cuda.empty_cache()` immediately after use to ensure memory is available for the next stage or process.
+- **Explicit Cleanup**: There is no embedding unload path anymore.
 
 ---
 

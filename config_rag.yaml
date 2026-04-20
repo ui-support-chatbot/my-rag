@@ -28,8 +28,8 @@ retrieval:
   k: 50                         # Candidate pool fetched from Milvus before reranking
   rerank_top_k: 5               # Docs passed to the LLM after reranking (prevents token overflow)
   hybrid_weight: 0.5
-  reranker_model: "jinaai/jina-reranker-v3"  # Set to null to disable
-  reranker_quantize_8bit: true
+  reranker_model: null  # Set to null to disable
+  reranker_endpoint: null
   min_score: 0.0
 
 # LLM generation

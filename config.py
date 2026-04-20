@@ -43,9 +43,8 @@ class RetrievalConfig:
     """Number of documents passed to the LLM after reranking."""
 
     hybrid_weight: float = 0.5
-    reranker_model: Optional[str] = "jinaai/jina-reranker-v3"
-    reranker_quantize_8bit: bool = False
-    reranker_device: str = "cuda:1"  # Put reranker on second GPU
+    reranker_model: Optional[str] = "jinaai/jina-reranker-v3-GGUF:Q5_K_M"
+    reranker_endpoint: Optional[str] = "http://127.0.0.1:8012/v1/rerank"
     min_score: float = 0.0
 
 

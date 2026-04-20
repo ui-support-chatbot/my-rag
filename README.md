@@ -6,7 +6,7 @@ A production-ready Retrieval-Augmented Generation (RAG) pipeline designed for re
 
 - **Advanced Ingestion**: PDF parsing via Docling, HTML extraction via Trafilatura, and Hybrid Chunking for token-aware, structure-preserving splitting.
 - **Hybrid Search**: Combines Dense (BGE) and Sparse (SPLADE) embeddings using Milvus.
-- **Reranking**: Integration with `bge-reranker-base` to improve retrieval precision.
+- **Reranking**: Integration with a dedicated GGUF reranker service to improve retrieval precision.
 - **Debuggability**: 
   - `find-keyword`: Locate specific keywords across all stored chunks.
   - `trace`: Verify if retrieved chunks contain specific keywords.

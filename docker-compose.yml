@@ -94,13 +94,13 @@ services:
 
     # ── GPU Configuration ──────────────────────────────────────────────────
     # GPU 0: Dense (Harrier) + Sparse (OpenSearch) embedding models
-    # GPU 1: Jina-v3 Reranker
+    # GPU 1: reserved for the dedicated reranker service
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: [ '0', '1' ]
+              device_ids: [ '0' ]
               capabilities: [ gpu ]
 
     # ── Docker 20.10 Security Workarounds ─────────────────────────────────
@@ -122,6 +122,41 @@ services:
       milvus:
         condition: service_healthy
 
+    restart: unless-stopped
+
+  reranker:
+    container_name: my-rag-reranker
+    image: ghcr.io/ggml-org/llama.cpp:server-cuda
+    network_mode: host
+    volumes:
+      - ./storage/hf_cache:/root/.cache/huggingface
+    command:
+      - -hf
+      - jinaai/jina-reranker-v3-GGUF:Q5_K_M
+      - --reranking
+      - --embedding
+      - --pooling
+      - rank
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8012"
+      - -ngl
+      - all
+      - --no-webui
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              device_ids: [ '1' ]
+              capabilities: [ gpu ]
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://127.0.0.1:8012/props" ]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+      start_period: 60s
     restart: unless-stopped
 
 volumes:

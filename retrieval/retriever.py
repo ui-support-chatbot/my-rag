@@ -2,6 +2,8 @@ from dataclasses import dataclass
 from typing import List, Optional, Dict, Any, Literal
 import logging
 
+from retrieval.reranker_client import LlamaServerReranker
+
 logger = logging.getLogger(__name__)
 
 
@@ -26,20 +28,18 @@ class Retriever:
         dense_model,
         sparse_model,
         milvus_client,
-        reranker_model: Optional[str] = "jinaai/jina-reranker-v3",
+        reranker_model: Optional[str] = "jinaai/jina-reranker-v3-GGUF:Q5_K_M",
+        reranker_endpoint: Optional[str] = "http://127.0.0.1:8012/v1/rerank",
         k: int = 50,
         hybrid_weight: float = 0.5,
-        reranker_quantize_8bit: bool = False,
-        reranker_device: str = "cuda:1",
     ):
         self.dense_model = dense_model
         self.sparse_model = sparse_model
         self.milvus = milvus_client
         self.reranker_model = reranker_model
+        self.reranker_endpoint = reranker_endpoint
         self.k = k
         self.hybrid_weight = hybrid_weight
-        self.reranker_quantize_8bit = reranker_quantize_8bit
-        self.reranker_device = reranker_device
         self._reranker = None
         self.device = "cuda" if _has_cuda() else "cpu"
 
@@ -48,52 +48,15 @@ class Retriever:
         self.dense_model.load()
         # Sparse model on CPU is fast to load, but we can call load() anyway
         self.sparse_model.load()
-        self.load_reranker()
-
-    def unload_models(self):
-        """Unload all models from memory to free VRAM for LLMs."""
-        self.dense_model.unload()
-        self.sparse_model.unload()
-        self.unload_reranker()
 
     def load_reranker(self):
-        """Lazily load jina-reranker-v3 via AutoModel with trust_remote_code."""
-        if self._reranker is None and self.reranker_model:
-            from transformers import AutoModel
-            import torch
-
-            kwargs = {
-                "trust_remote_code": True,
-                "dtype": torch.float32,
-                "attn_implementation": "sdpa",
-            }
-            if self.reranker_quantize_8bit:
-                kwargs["load_in_8bit"] = True
-
-            # Use the "Nuclear" map to force every sub-module onto GPU 1
-            model = AutoModel.from_pretrained(
-                self.reranker_model,
-                device_map={"": self.reranker_device}, 
-                **kwargs
+        """Create the HTTP client for llama.cpp reranking."""
+        if self._reranker is None and self.reranker_model and self.reranker_endpoint:
+            self._reranker = LlamaServerReranker(
+                endpoint=self.reranker_endpoint,
+                model=self.reranker_model,
             )
-            model.eval()
-            
-            # Real-time check: find out where the model "brain" actually ended up
-            actual_device = next(model.parameters()).device
-            logger.info(f"Reranker model anchored to {actual_device} (Aggressive Map)")
-            
-            self._reranker = {"model": model}
         return self._reranker
-
-    def unload_reranker(self):
-        if self._reranker is not None:
-            import gc
-            import torch
-            del self._reranker
-            self._reranker = None
-            gc.collect()
-            if torch.cuda.is_available():
-                torch.cuda.empty_cache()
 
     @property
     def reranker(self):
@@ -226,9 +189,9 @@ class Retriever:
     def _rerank(
         self, query: str, docs: List[RetrievedDocument]
     ) -> List[RetrievedDocument]:
-        """Rerank using jina-reranker-v3's built-in .rerank() method.
+        """Rerank using the external llama.cpp reranking endpoint.
 
-        The model returns a list of dicts:
+        The endpoint returns a list of dicts:
             [{"document": str, "relevance_score": float, "index": int}, ...]
         sorted from most to least relevant.
 
@@ -238,9 +201,8 @@ class Retriever:
         if not docs or not self.reranker:
             return docs
 
-        model = self.reranker["model"]
+        model = self.reranker
         doc_texts = [d.text for d in docs]
-
         results = model.rerank(query, doc_texts)
 
         reranked = []

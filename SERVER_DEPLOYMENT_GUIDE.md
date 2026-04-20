@@ -179,7 +179,7 @@ services:
 
     # ── GPU Configuration ──────────────────────────────────────────────────
     # GPU 0: Dense (Harrier) + Sparse (OpenSearch) embedding models
-    # GPU 1: Jina-v3 Reranker
+    # GPU 1: Dedicated reranker service
     deploy:
       resources:
         reservations:
@@ -375,7 +375,7 @@ docker run -d --name ollama \
 | GPU | Used By | When |
 |-----|---------|------|
 | GPU 0 | Harrier dense embedding + OpenSearch sparse embedding | Ingestion & query time |
-| GPU 1 | Jina-v3 reranker | Query time only |
+| GPU 1 | GGUF reranker service | Query time only |
 | Host (Ollama) | LLM generation | Query time only |
 
 > [!TIP]
@@ -388,8 +388,26 @@ If deploying on GTX 1080/1070 (Pascal Architecture), use these specific rules fo
 2. **SDPA is Mandatory**: Standard attention with Jina-v3 will try to allocate ~12.29 GB of VRAM for its attention mask. Using `attn_implementation="sdpa"` in `retriever.py` and `dense.py` bypasses this bug.
 3. **Partitioned Workload**:
     * **GPU 0**: Handles the "light" embedding models (Dense + Sparse).
-    * **GPU 1**: Handles the "heavy" models (Reranker + LLM/Ollama).
-    This ensures that the card running the 7B LLM has the maximum possible breathing room.
+    * **GPU 1**: Handles the reranker service only.
+    * Keep Ollama off GPU 1 if you want the reranker to stay stable.
+    This is the most reliable setup on 2x GTX 1080 when the reranker is enabled.
+
+### 9.2 GGUF Reranker Service
+
+Run the reranker as a separate llama.cpp server so the Python app only calls HTTP:
+
+```bash
+llama-server \
+  -hf jinaai/jina-reranker-v3-GGUF:Q5_K_M \
+  --reranking \
+  --embedding \
+  --pooling rank \
+  --host 0.0.0.0 \
+  --port 8012 \
+  -ngl all
+```
+
+The API client uses `http://127.0.0.1:8012/v1/rerank` and sends `query`, `documents`, `top_n`, and `model`.
 
 ## 10. Persistence & Data Management
 
@@ -448,7 +466,7 @@ This section documents every production issue encountered on `riset-01` and its 
 | `AttributeError: SparseEncoder has no attribute 'encode_documents'` | Sentence-Transformers v3.x renamed methods to singular (`encode_document`) | Code updated in `sparse.py` and `retriever.py` ✅ |
 | `No OCR engine found` (despite installation) | `opencv-python` requires `libGL.so.1` which is missing in `python:slim` | Use `opencv-python-headless` in `requirements.txt` ✅ |
 | `CUDA out of memory` during ingestion | SPLADE model vocabulary expansion (30k dims) is too large for batch size 32 | Lower `batch_size` to `16` or `4` in `config_server.yaml` ✅ |
-| **Increased Query Latency** | Models are lazily loaded and unloaded to save VRAM | This is a known trade-off to allow the LLM and RAG models to share a single GPU. Models are loaded on-demand and unloaded after retrieval. ✅ |
+| **Increased Query Latency** | Models are unloaded between queries to save VRAM | That tradeoff is no longer used. Dense/sparse embeddings stay resident, and the reranker runs as a dedicated service. ✅ |
 | `Failed to initialize NumPy: _ARRAY_API not found` | NumPy 2.x broke C ABI compatibility with Torch 2.2.2 | Pin `numpy>=1.24.0,<2.0` in `requirements.txt` ✅ (already fixed) |
 | `CollectionSchema.add_field() missing ... arguments` | Wrong keyword arguments passed to Milvus schema (`name` vs `field_name`) | Fixed in `milvus_client.py` ✅ (already fixed) |
 
@@ -469,6 +487,7 @@ This section documents every production issue encountered on `riset-01` and its 
 | First query takes 2-5 minutes | Models downloading on first use | Mount `./storage/hf_cache` and wait for initial download to complete once |
 | Slow inference (minutes per query) | Ollama running on CPU, not GPU | `docker run --gpus all ollama/ollama` (see Section 9) |
 | **100% CPU during Reranking** | **Intensive Preprocessing** | **Expected Behavior.** Reranking 30+ documents with Jina-v3 requires heavy CPU tokenization and sequence building before the GPU math begins. This spikes all cores but is not an error. |
+| **7GB+ VRAM on GPU 1** | **Listwise long-context reranker in FP32** | The reranker is the hotspot. Replace it with the GGUF reranker service and keep generation off GPU 1. Recommended quantization: Q5_K_M. |
 | **100% CPU / Heavy Lag on 1080** | **Forcing float16 on Pascal GPU** | Revert to `dtype: torch.float32`. GTX 1080 cards have no FP16 hardware acceleration; they are 64x slower in float16 than in float32. ✅ |
 | Context Precision/Recall low | `k` (candidate pool) too small | Increase `retrieval.k` in config — proven optimal at `k=15` with this dataset |
 | **12GB allocation error** | **Qwen Global Mask bug** | Set `attn_implementation: "sdpa"`. This prevents the model from trying to allocate a massive mask for the 131k context window. ✅ |

@@ -76,11 +76,11 @@ class RAGPipeline:
             sparse_model=self.sparse_model,
             milvus_client=self.storage,
             reranker_model=config.retrieval.reranker_model,
+            reranker_endpoint=config.retrieval.reranker_endpoint,
             k=config.retrieval.k,
             hybrid_weight=config.retrieval.hybrid_weight,
-            reranker_quantize_8bit=config.retrieval.reranker_quantize_8bit,
-            reranker_device=config.retrieval.reranker_device,
         )
+        self.retriever.load_models()
         self.llm = llm or LLM(
             endpoint=config.generation.llm_endpoint,
             model_name=config.generation.model_name,
@@ -211,10 +211,7 @@ class RAGPipeline:
             )
 
         # ── 6. Memory Cleanup ────────────────────────────────────────────────
-        # Force unload models after heavy ingestion to free VRAM for LLM queries
-        logger.info("Ingestion complete. Unloading models to free VRAM...")
-        self.dense_model.unload()
-        self.sparse_model.unload()
+        logger.info("Ingestion complete. Keeping embedding models loaded.")
 
         logger.info(f"Indexed {len(data)} chunks from {len(processed_sources)} files.")
         return len(data)
@@ -295,20 +292,14 @@ class RAGPipeline:
             metadata_filter=metadata_filter,
             k=k or self.config.retrieval.k,
         )
-
         # Slice to rerank_top_k to avoid LLM token overflow.
-        # After Jina reranking, docs are sorted best-first — we take only the top N.
+        # After reranking, docs are sorted best-first — we take only the top N.
         rerank_top_k = self.config.retrieval.rerank_top_k
         docs = docs[:rerank_top_k]
         logger.info(
             f"Passing top-{rerank_top_k} reranked docs to LLM "
             f"(retrieved {len(docs)} total after RRF)"
         )
-
-        # Unload retriever models to free VRAM for the LLM.
-        # NOTE: This is a trade-off. It saves GPU memory but increases query
-        # latency because models must be re-loaded for the next request.
-        self.retriever.unload_models()
 
         # LLM.generate handles context formatting with Source [breadcrumb] markers
         result = self.llm.generate(
@@ -340,11 +331,8 @@ class RAGPipeline:
             metadata_filter=metadata_filter,
             k=k or self.config.retrieval.k,
         )
-
         rerank_top_k = self.config.retrieval.rerank_top_k
         docs = docs[:rerank_top_k]
-        
-        self.retriever.unload_models()
 
         # Yield a special "metadata" chunk first to provide sources
         sources = [

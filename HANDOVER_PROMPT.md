@@ -17,8 +17,8 @@ The RAG system has been upgraded with production-grade data management and user 
 - **Status Dashboard**:
     - New `/ingestion/status` endpoint to see all indexed files and hashes.
 - **Multi-GPU Distribution**:
-    - Partitioned workload: **GPU 0** (Dense Embedding) and **GPU 1** (Reranker + LLM).
-    - Prevents "Peak OOM" by spreading components across 2x 8GB cards.
+    - Partitioned workload: **GPU 0** (Dense Embedding) and **GPU 1** (Reranker only).
+    - Prevents "Peak OOM" by keeping the reranker away from the embeddings.
     - Sparse models are offloaded to **CPU** for query-time inference.
 
 ## 2. Technical Decisions & Best Practices
@@ -30,11 +30,11 @@ The RAG system has been upgraded with production-grade data management and user 
 
 ## 3. GPU Memory Tracking (Persistent Context)
 
-The system uses **Spatial Partitioning**, **Lazy Loading**, and **8-bit Quantization**:
+The system uses **Spatial Partitioning** and a **separate GGUF reranker service**:
 - **GPU 0**: Harrier (Dense) model.
-- **GPU 1**: Jina-v3 (Reranker) and Ollama/vLLM backend.
-- **Auto-Unload**: Both `query` and `ingest` methods call `unload_models()` to clear VRAM immediately after use.
-- **LLM**: Typically runs on GPU 1 to share VRAM with the reranker.
+- **GPU 1**: Dedicated reranker service (GGUF via llama.cpp).
+- **Embeddings**: Dense/sparse are loaded once and kept resident.
+- **Auto-Unload**: Removed. There is no lazy unloading path anymore.
 
 ## 4. Verification & Testing
 
