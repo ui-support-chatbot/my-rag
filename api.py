@@ -252,7 +252,7 @@ async def query_rag(request: QueryRequest, response: Response):
 async def query_rag_stream(request: QueryRequest):
     """
     Streaming version of the RAG query. 
-    Returns an SSE stream of JSON objects (type: 'sources' or 'token').
+    Returns an SSE stream of JSON objects (type: 'metadata', 'sources', or 'token').
     """
     if not rag_pipeline:
         raise HTTPException(status_code=503, detail="RAG Pipeline not initialized")

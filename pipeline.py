@@ -357,12 +357,14 @@ class RAGPipeline:
             if confidence_score is None:
                 confidence_score = self.llm.get_confidence_score(query, docs)
 
-            # Yield metadata (Confidence + Sources)
-            metadata = {
-                "confidence": confidence_score,
-                "num_docs": len(docs)
+            # Yield search metadata (Confidence + Doc count)
+            metadata_payload = {
+                "confidence_score": confidence_score,
+                "num_docs": len(docs),
+                "query": query
             }
-            yield f"data: {json.dumps({'type': 'metadata', 'content': metadata})}\n\n"
+            logger.info(f"Streaming metadata: {metadata_payload}")
+            yield f"data: {json.dumps({'type': 'metadata', 'content': metadata_payload})}\n\n"
 
             # Yield sources separately for backward compatibility/UI richness
             sources = [
