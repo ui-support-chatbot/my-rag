@@ -41,22 +41,9 @@ class Chunker:
         for chunk in self.chunker.chunk(docling_doc):
             chunk_text = chunk.text
 
-            # --- Build Enhanced Breadcrumb ---
-            breadcrumb_parts = []
-            if domain:
-                breadcrumb_parts.append(domain)
-            
-            # Use filename as secondary context
-            doc_name = os.path.basename(filename)
-            breadcrumb_parts.append(doc_name)
-            
-            # Add Docling's structural headings
-            if chunk.meta.headings:
-                breadcrumb_parts.extend(chunk.meta.headings)
-            elif not breadcrumb_parts:
-                breadcrumb_parts.append("Root")
-                
-            breadcrumb = " > ".join(breadcrumb_parts)
+            # --- Breadcrumb replacement ---
+            # We no longer use structural breadcrumbs. Metadata URLs are used instead downstream.
+            breadcrumb = ""
 
             # Page number
             page_number = None

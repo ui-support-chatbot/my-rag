@@ -59,14 +59,24 @@ class LLM:
     ) -> GenerationResult:
         from generation.prompts import DEFAULT_SYSTEM_PROMPT
 
-        # Format context with Source [breadcrumb] and [URL] markers
+        # Format context with specialized metadata-based breadcrumbs
         if retrieved_docs:
-            formatted_context = "\n\n".join(
-                [
-                    f"Source [{doc.metadata.get('breadcrumb', 'Unknown')}] (URL: {doc.metadata.get('source_url', 'N/A')}): {doc.text}"
-                    for doc in retrieved_docs
-                ]
-            )
+            context_parts = []
+            for doc in retrieved_docs:
+                # Format: [PDF_URL | PAGE_URL (Scraped: YYYY-MM-DD)]
+                pdf = doc.metadata.get("pdf_url")
+                page = doc.metadata.get("page_url")
+                scraped = doc.metadata.get("scraped_at", "N/A")
+                date_str = scraped.split("T")[0] if "T" in scraped else scraped
+                
+                url_part = f"{pdf}" if pdf else ""
+                if page:
+                    url_part = f"{url_part} | {page}" if url_part else page
+                
+                citation = f"Source [{url_part} (Scraped: {date_str})]"
+                context_parts.append(f"{citation}: {doc.text}")
+            
+            formatted_context = "\n\n".join(context_parts)
         else:
             formatted_context = context or "No context provided."
 
@@ -89,12 +99,12 @@ class LLM:
 
             sources = []
             if retrieved_docs:
-                    sources = [
+                sources = [
                     {
-                        "breadcrumb": doc.metadata.get("breadcrumb", "Unknown"),
-                        "filename": doc.metadata.get("source", "Unknown"),
+                        "pdf_url": doc.metadata.get("pdf_url"),
+                        "page_url": doc.metadata.get("page_url"),
+                        "scraped_at": doc.metadata.get("scraped_at"),
                         "page": doc.metadata.get("page_number", "Unknown"),
-                        "url": doc.metadata.get("source_url"),
                     }
                     for doc in retrieved_docs
                 ]
@@ -120,12 +130,21 @@ class LLM:
         from generation.prompts import DEFAULT_SYSTEM_PROMPT
 
         if retrieved_docs:
-            formatted_context = "\n\n".join(
-                [
-                    f"Source [{doc.metadata.get('breadcrumb', 'Unknown')}] (URL: {doc.metadata.get('source_url', 'N/A')}): {doc.text}"
-                    for doc in retrieved_docs
-                ]
-            )
+            context_parts = []
+            for doc in retrieved_docs:
+                pdf = doc.metadata.get("pdf_url")
+                page = doc.metadata.get("page_url")
+                scraped = doc.metadata.get("scraped_at", "N/A")
+                date_str = scraped.split("T")[0] if "T" in scraped else scraped
+                
+                url_part = f"{pdf}" if pdf else ""
+                if page:
+                    url_part = f"{url_part} | {page}" if url_part else page
+                
+                citation = f"Source [{url_part} (Scraped: {date_str})]"
+                context_parts.append(f"{citation}: {doc.text}")
+            
+            formatted_context = "\n\n".join(context_parts)
         else:
             formatted_context = context or "No context provided."
 

@@ -186,14 +186,15 @@ class RAGPipeline:
                 "chunk_index": chunk.chunk_index,
                 "dense_embedding": dense_emb,
                 "sparse_embedding": sparse_emb,
-                "breadcrumb": chunk.breadcrumb,
+                "pdf_url": chunk.metadata.get("pdf_url"),
+                "page_url": chunk.metadata.get("page_url"),
+                "scraped_at": chunk.metadata.get("scraped_at"),
                 "page_number": chunk.page_number,
-                "source": chunk.filename,
-                "source_url": chunk.metadata.get("source_url", ""),
             }
             record.update(chunk.metadata)
             data.append(record)
-            processed_sources.add(chunk.filename)
+            # Use doc_id or URL as tracking key instead of filename
+            processed_sources.add(chunk.doc_id)
 
         self.storage.insert(collection_name, data)
         
@@ -336,9 +337,8 @@ class RAGPipeline:
         confidence_score: Optional[float] = None,
     ):
         """Streaming version of the RAG pipeline query."""
-        # Yield status immediately so client knows we've started
         # format: data: {json}\n\n (Standard SSE)
-        yield f"data: {json.dumps({'type': 'status', 'content': 'retrieving'})}\n\n"
+        yield f"data: {json.dumps()}\n\n"
 
         try:
             if pre_retrieved_docs:
@@ -369,10 +369,10 @@ class RAGPipeline:
             # Yield sources separately for backward compatibility/UI richness
             sources = [
                 {
-                    "breadcrumb": doc.metadata.get("breadcrumb", "Unknown"),
-                    "filename": doc.metadata.get("source", "Unknown"),
+                    "pdf_url": doc.metadata.get("pdf_url"),
+                    "page_url": doc.metadata.get("page_url"),
+                    "scraped_at": doc.metadata.get("scraped_at"),
                     "page": doc.metadata.get("page_number", "Unknown"),
-                    "url": doc.metadata.get("source_url"),
                 }
                 for doc in docs
             ]

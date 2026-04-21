@@ -106,9 +106,10 @@ class ChunkInfo(BaseModel):
     doc_id: str
     chunk_index: int
     text: str
-    breadcrumb: str
+    pdf_url: Optional[str] = None
+    page_url: Optional[str] = None
+    scraped_at: Optional[str] = None
     page_number: int
-    filename: str
     char_count: int
     token_count: Optional[int] = None
     metadata: Optional[Dict[str, Any]] = None
@@ -133,7 +134,9 @@ class RetrievedDocInfo(BaseModel):
     rrf_score: float
     dense_score: Optional[float] = None
     sparse_score: Optional[float] = None
-    breadcrumb: str
+    pdf_url: Optional[str] = None
+    page_url: Optional[str] = None
+    scraped_at: Optional[str] = None
     page_number: int
 
 
@@ -157,7 +160,9 @@ class RerankedDocInfo(BaseModel):
     rrf_score: float
     rerank_score: float
     final_score: float
-    breadcrumb: str
+    pdf_url: Optional[str] = None
+    page_url: Optional[str] = None
+    scraped_at: Optional[str] = None
     page_number: int
 
 
@@ -386,9 +391,10 @@ async def debug_chunks(request: DebugChunksRequest):
                 doc_id=chunk.doc_id,
                 chunk_index=chunk.chunk_index,
                 text=chunk.text,
-                breadcrumb=chunk.breadcrumb,
+                pdf_url=chunk.metadata.get("pdf_url"),
+                page_url=chunk.metadata.get("page_url"),
+                scraped_at=chunk.metadata.get("scraped_at"),
                 page_number=chunk.page_number,
-                filename=chunk.filename,
                 char_count=len(chunk.text),
                 token_count=token_count,
                 metadata=dict(chunk.metadata) if chunk.metadata else {}
@@ -466,7 +472,9 @@ async def debug_retrieve(request: DebugRetrieveRequest):
                 rrf_score=doc.score,
                 dense_score=None,
                 sparse_score=None,
-                breadcrumb=doc.metadata.get("breadcrumb", ""),
+                pdf_url=doc.metadata.get("pdf_url"),
+                page_url=doc.metadata.get("page_url"),
+                scraped_at=doc.metadata.get("scraped_at"),
                 page_number=doc.metadata.get("page_number") or 0
             )
             retrieved_docs.append(doc_info)
@@ -518,9 +526,11 @@ async def debug_rerank(request: DebugRerankRequest):
                 doc_id=doc.doc_id,
                 chunk_index=doc.chunk_index,
                 rrf_score=doc.score,  # This is the RRF score before reranking
-                rerank_score=doc.score,  # The score after reranking (this is actually the reranked score)
-                final_score=doc.score,  # Same as rerank_score in this context
-                breadcrumb=doc.metadata.get("breadcrumb", ""),
+                rerank_score=doc.score,  # The score after reranking
+                final_score=doc.score,
+                pdf_url=doc.metadata.get("pdf_url"),
+                page_url=doc.metadata.get("page_url"),
+                scraped_at=doc.metadata.get("scraped_at"),
                 page_number=doc.metadata.get("page_number") or 0
             )
             reranked_docs_info.append(doc_info)
