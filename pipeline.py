@@ -337,8 +337,6 @@ class RAGPipeline:
         confidence_score: Optional[float] = None,
     ):
         """Streaming version of the RAG pipeline query."""
-        # format: data: {json}\n\n (Standard SSE)
-        yield f"data: {json.dumps()}\n\n"
 
         try:
             if pre_retrieved_docs:
