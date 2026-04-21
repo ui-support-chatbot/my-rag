@@ -33,6 +33,7 @@ class RAGResult:
     context: str
     retrieved_docs: List[Any]
     sources: List[Dict[str, Any]]
+    confidence_score: float = 1.0
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -276,6 +277,7 @@ class RAGPipeline:
         metadata_filter: Optional[Dict] = None,
         k: Optional[int] = None,
         return_context: bool = True,
+        pre_retrieved_docs: Optional[List[Any]] = None,
     ) -> RAGResult:
         """
         Run the full RAG pipeline:
@@ -283,15 +285,19 @@ class RAGPipeline:
           2. Milvus hybrid search → RRF fusion (top-k candidates)
           3. Jina-v3 reranking
           4. Slice to rerank_top_k for LLM context window
-          5. Grounded generation
+          5. Calculate confidence score
+          6. Grounded generation
         """
-        docs = self.retriever.retrieve(
-            query=query,
-            collection_name=self.config.storage.collection_name,
-            doc_ids=doc_ids,
-            metadata_filter=metadata_filter,
-            k=k or self.config.retrieval.k,
-        )
+        if pre_retrieved_docs:
+            docs = pre_retrieved_docs
+        else:
+            docs = self.retriever.retrieve(
+                query=query,
+                collection_name=self.config.storage.collection_name,
+                doc_ids=doc_ids,
+                metadata_filter=metadata_filter,
+                k=k or self.config.retrieval.k,
+            )
         # Slice to rerank_top_k to avoid LLM token overflow.
         # After reranking, docs are sorted best-first — we take only the top N.
         rerank_top_k = self.config.retrieval.rerank_top_k
@@ -300,6 +306,9 @@ class RAGPipeline:
             f"Passing top-{rerank_top_k} reranked docs to LLM "
             f"(retrieved {len(docs)} total after RRF)"
         )
+
+        # Confidence scoring (LLM-based)
+        confidence_score = self.llm.get_confidence_score(query, docs)
 
         # LLM.generate handles context formatting with Source [breadcrumb] markers
         result = self.llm.generate(
@@ -313,6 +322,7 @@ class RAGPipeline:
             context=result.context,
             retrieved_docs=docs,
             sources=result.sources,
+            confidence_score=confidence_score,
             metadata={"query": query, "num_docs": len(docs)},
         )
 
@@ -322,6 +332,8 @@ class RAGPipeline:
         doc_ids: Optional[List[str]] = None,
         metadata_filter: Optional[Dict] = None,
         k: Optional[int] = None,
+        pre_retrieved_docs: Optional[List[Any]] = None,
+        confidence_score: Optional[float] = None,
     ):
         """Streaming version of the RAG pipeline query."""
         # Yield status immediately so client knows we've started
@@ -329,17 +341,32 @@ class RAGPipeline:
         yield f"data: {json.dumps({'type': 'status', 'content': 'retrieving'})}\n\n"
 
         try:
-            docs = self.retriever.retrieve(
-                query=query,
-                collection_name=self.config.storage.collection_name,
-                doc_ids=doc_ids,
-                metadata_filter=metadata_filter,
-                k=k or self.config.retrieval.k,
-            )
-            rerank_top_k = self.config.retrieval.rerank_top_k
-            docs = docs[:rerank_top_k]
+            if pre_retrieved_docs:
+                docs = pre_retrieved_docs
+            else:
+                docs = self.retriever.retrieve(
+                    query=query,
+                    collection_name=self.config.storage.collection_name,
+                    doc_ids=doc_ids,
+                    metadata_filter=metadata_filter,
+                    k=k or self.config.retrieval.k,
+                )
+                rerank_top_k = self.config.retrieval.rerank_top_k
+                docs = docs[:rerank_top_k]
 
-            # Yield sources
+            # If confidence wasn't provided (e.g. called directly from pipeline, not API)
+            # calculate it now.
+            if confidence_score is None:
+                confidence_score = self.llm.get_confidence_score(query, docs)
+
+            # Yield metadata (Confidence + Sources)
+            metadata = {
+                "confidence": confidence_score,
+                "num_docs": len(docs)
+            }
+            yield f"data: {json.dumps({'type': 'metadata', 'content': metadata})}\n\n"
+
+            # Yield sources separately for backward compatibility/UI richness
             sources = [
                 {
                     "breadcrumb": doc.metadata.get("breadcrumb", "Unknown"),

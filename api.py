@@ -1,5 +1,5 @@
 from contextlib import asynccontextmanager
-from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File
+from fastapi import FastAPI, HTTPException, BackgroundTasks, UploadFile, File, Response
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
@@ -211,7 +211,7 @@ async def ingestion_status():
 
 
 @app.post("/query", response_model=RAGResponse, summary="Run a RAG query")
-async def query_rag(request: QueryRequest):
+async def query_rag(request: QueryRequest, response: Response):
     """
     Embed the query using dense (Harrier) + sparse (OpenSearch) models,
     fuse results with RRF, rerank with Jina-v3, and generate a grounded answer.
@@ -226,11 +226,17 @@ async def query_rag(request: QueryRequest):
         )
         clean_answer = strip_thought_process(result.answer)
 
+        # Set confidence header
+        response.headers["X-Confidence-Rate"] = str(result.confidence_score)
+
         return {
             "answer": clean_answer,
             "context": result.context,
             "sources": result.sources,
-            "metadata": result.metadata,
+            "metadata": {
+                **result.metadata,
+                "confidence_score": result.confidence_score
+            },
         }
     except Exception as e:
         logger.error(f"Query failed: {e}", exc_info=True)
@@ -246,15 +252,38 @@ async def query_rag_stream(request: QueryRequest):
     if not rag_pipeline:
         raise HTTPException(status_code=503, detail="RAG Pipeline not initialized")
 
-    return StreamingResponse(
-        rag_pipeline.query_stream(request.query, metadata_filter=request.metadata_filter),
-        media_type="text/event-stream",
-        headers={
-            "X-Accel-Buffering": "no",
-            "Cache-Control": "no-cache",
-            "Connection": "keep-alive",
-        }
-    )
+    try:
+        # Pre-retrieval for headers
+        docs = rag_pipeline.retriever.retrieve(
+            query=request.query,
+            collection_name=rag_pipeline.config.storage.collection_name,
+            metadata_filter=request.metadata_filter,
+            k=rag_pipeline.config.retrieval.k,
+        )
+        rerank_top_k = rag_pipeline.config.retrieval.rerank_top_k
+        docs = docs[:rerank_top_k]
+
+        # Calculate confidence score BEFORE starting the stream
+        confidence_score = rag_pipeline.llm.get_confidence_score(request.query, docs)
+
+        return StreamingResponse(
+            rag_pipeline.query_stream(
+                request.query, 
+                metadata_filter=request.metadata_filter,
+                pre_retrieved_docs=docs,
+                confidence_score=confidence_score
+            ),
+            media_type="text/event-stream",
+            headers={
+                "X-Accel-Buffering": "no",
+                "Cache-Control": "no-cache",
+                "Connection": "keep-alive",
+                "X-Confidence-Rate": str(confidence_score),
+            }
+        )
+    except Exception as e:
+        logger.error(f"Streaming query setup failed: {e}", exc_info=True)
+        raise HTTPException(status_code=500, detail=str(e))
 
 
 def _background_ingestion(directory: str) -> None:

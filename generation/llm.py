@@ -159,3 +159,49 @@ class LLM:
         for prompt, ctx in zip(prompts, contexts):
             results.append(self.generate(prompt, context=ctx))
         return results
+
+    def get_confidence_score(
+        self,
+        query: str,
+        retrieved_docs: List[Any],
+    ) -> float:
+        """Rate how well the retrieved docs can answer the query (0 to 1)."""
+        from generation.prompts import CONFIDENCE_CHECK_PROMPT
+        import re
+
+        # Fast path if no docs
+        if not retrieved_docs:
+            return 0.0
+
+        formatted_context = "\n\n".join(
+            [f"[{i+1}] {doc.text}" for i, doc in enumerate(retrieved_docs)]
+        )
+
+        prompt = CONFIDENCE_CHECK_PROMPT.format(
+            query=query, context=formatted_context
+        )
+
+        try:
+            # We use very low max_tokens and temperature for speed/consistency
+            response = self.client.chat.completions.create(
+                model=self.model_name,
+                messages=[
+                    {"role": "user", "content": prompt},
+                ],
+                max_tokens=10,
+                temperature=0.0,
+            )
+            raw_output = response.choices[0].message.content.strip()
+            
+            # Extract number using regex (handles "Score: 0.8" or "0.8")
+            match = re.search(r"(\d+\.?\d*)", raw_output)
+            if match:
+                score = float(match.group(1))
+                return max(0.0, min(1.0, score))
+            
+            logger.warning(f"Could not parse confidence score from: {raw_output}")
+            return 0.5  # Neutral fallback
+            
+        except Exception as e:
+            logger.error(f"Confidence check failed: {e}")
+            return 0.5

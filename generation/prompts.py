@@ -38,5 +38,16 @@ Document:
 {doc}
 
 Output as JSON array:
-[{{"question": "...", "answer": "..."}}]
+[{"question": "...", "answer": "..."}]
 """
+
+CONFIDENCE_CHECK_PROMPT = """Rate the confidence (0 to 1) that the following context contains enough information to accurately answer the query.
+1 means the answer is fully present in the context.
+0.5 means the context is partially relevant but incomplete.
+0 means the context has no relevant information.
+
+Output ONLY the numerical score (e.g., 0.85). Do not include any other text.
+
+Query: {query}
+Context: {context}
+Confidence Score: """
