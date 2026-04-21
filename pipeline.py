@@ -324,32 +324,40 @@ class RAGPipeline:
         k: Optional[int] = None,
     ):
         """Streaming version of the RAG pipeline query."""
-        docs = self.retriever.retrieve(
-            query=query,
-            collection_name=self.config.storage.collection_name,
-            doc_ids=doc_ids,
-            metadata_filter=metadata_filter,
-            k=k or self.config.retrieval.k,
-        )
-        rerank_top_k = self.config.retrieval.rerank_top_k
-        docs = docs[:rerank_top_k]
+        # Yield status immediately so client knows we've started
+        # format: data: {json}\n\n (Standard SSE)
+        yield f"data: {json.dumps({'type': 'status', 'content': 'retrieving'})}\n\n"
 
-        # Yield a special "metadata" chunk first to provide sources
-        sources = [
-            {
-                "breadcrumb": doc.metadata.get("breadcrumb", "Unknown"),
-                "filename": doc.metadata.get("source", "Unknown"),
-                "page": doc.metadata.get("page_number", "Unknown"),
-                "url": doc.metadata.get("source_url"),
-            }
-            for doc in docs
-        ]
-        
-        yield json.dumps({"type": "sources", "content": sources}) + "\n"
+        try:
+            docs = self.retriever.retrieve(
+                query=query,
+                collection_name=self.config.storage.collection_name,
+                doc_ids=doc_ids,
+                metadata_filter=metadata_filter,
+                k=k or self.config.retrieval.k,
+            )
+            rerank_top_k = self.config.retrieval.rerank_top_k
+            docs = docs[:rerank_top_k]
 
-        # Stream the LLM response
-        for token in self.llm.generate_stream(prompt=query, retrieved_docs=docs):
-            yield json.dumps({"type": "token", "content": token}) + "\n"
+            # Yield sources
+            sources = [
+                {
+                    "breadcrumb": doc.metadata.get("breadcrumb", "Unknown"),
+                    "filename": doc.metadata.get("source", "Unknown"),
+                    "page": doc.metadata.get("page_number", "Unknown"),
+                    "url": doc.metadata.get("source_url"),
+                }
+                for doc in docs
+            ]
+            yield f"data: {json.dumps({'type': 'sources', 'content': sources})}\n\n"
+
+            # Stream the LLM response
+            for token in self.llm.generate_stream(prompt=query, retrieved_docs=docs):
+                yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+
+        except Exception as e:
+            logger.error(f"Streaming query failed: {e}", exc_info=True)
+            yield f"data: {json.dumps({'type': 'error', 'content': str(e)})}\n\n"
 
     def query_with_keyword_check(
         self,
