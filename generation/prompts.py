@@ -41,13 +41,22 @@ Output as JSON array:
 [{"question": "...", "answer": "..."}]
 """
 
-CONFIDENCE_CHECK_PROMPT = """Rate the confidence (0 to 1) that the following context contains enough information to accurately answer the query.
-1 means the answer is fully present in the context.
-0.5 means the context is partially relevant but incomplete.
-0 means the context has no relevant information.
+CONFIDENCE_CHECK_PROMPT = """You are a precise classifier.
+Task: Rate the probability (0.0 to 1.0) that the provided context contains enough information to answer the query.
 
-Output ONLY the numerical score (e.g., 0.85). Do not include any other text.
+Calibration Guidelines:
+- 1.0: Context contains the exact answer.
+- 0.8: Answer is clearly present but requires minor connection of facts.
+- 0.5: Context is on-topic but missing key details for a full answer.
+- 0.2: Context mentions related keywords but lacks substance.
+- 0.0: Context is completely irrelevant.
+
+Rules:
+- Respond with ANY decimal between 0.0 and 1.0. 
+- Use the full range (e.g., 0.95, 0.72, 0.40).
+- Output ONLY the score in this format: [SCORE: X.X]
+- NO other text or explanation.
 
 Query: {query}
 Context: {context}
-Confidence Score: """
+Result: """

@@ -182,18 +182,30 @@ class LLM:
         )
 
         try:
-            # We use very low max_tokens and temperature for speed/consistency
+            # We split instructions into System and User roles for better format enforcement
+            system_instruction = "\n".join(CONFIDENCE_CHECK_PROMPT.split("\n")[:-3])
+            user_input = "\n".join(CONFIDENCE_CHECK_PROMPT.split("\n")[-3:]).format(
+                query=query, context=formatted_context
+            )
+
             response = self.client.chat.completions.create(
                 model=self.model_name,
                 messages=[
-                    {"role": "user", "content": prompt},
+                    {"role": "system", "content": system_instruction},
+                    {"role": "user", "content": user_input},
                 ],
-                max_tokens=10,
+                max_tokens=20,
                 temperature=0.0,
             )
             raw_output = response.choices[0].message.content.strip()
             
-            # Extract number using regex (handles "Score: 0.8" or "0.8")
+            # Robust parser: looks for [SCORE: X.X] or just a float.
+            # 1. Try to find the score in the preferred [SCORE: X.X] format
+            format_match = re.search(r"\[SCORE:\s*(\d+\.?\d*)\]", raw_output, re.IGNORECASE)
+            if format_match:
+                return max(0.0, min(1.0, float(format_match.group(1))))
+            
+            # 2. Fallback: just look for any floating point number
             match = re.search(r"(\d+\.?\d*)", raw_output)
             if match:
                 score = float(match.group(1))
