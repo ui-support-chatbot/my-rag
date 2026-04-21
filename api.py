@@ -248,7 +248,12 @@ async def query_rag_stream(request: QueryRequest):
 
     return StreamingResponse(
         rag_pipeline.query_stream(request.query, metadata_filter=request.metadata_filter),
-        media_type="text/event-stream"
+        media_type="text/event-stream",
+        headers={
+            "X-Accel-Buffering": "no",
+            "Cache-Control": "no-cache",
+            "Connection": "keep-alive",
+        }
     )
 
 

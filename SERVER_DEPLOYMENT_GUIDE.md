@@ -508,6 +508,43 @@ docker run --rm \
 
 ---
 
+## 12. Production Architecture: Adding Nginx
+
+While you can access the RAG API directly on port 8000, for a production or public-facing deployment, it is highly recommended to use **Nginx** as a reverse proxy.
+
+### Why use Nginx?
+
+1.  **SSL/TLS Termination**: Nginx is the standard way to handle HTTPS certificates (e.g., via Let's Encrypt).
+2.  **Buffering Control**: Our API sends `X-Accel-Buffering: no`. Nginx respects this and ensures that LLM tokens are streamed to the user in real-time, rather than being collected into large, laggy chunks.
+3.  **Static Serving**: Nginx can serve your frontend (React/Vue) and your source documents (PDFs) much faster than FastAPI.
+4.  **Security**: It acts as a shield, providing rate limiting and header filtering before requests reach your Python code.
+
+### Example Nginx Configuration Snippet
+
+```nginx
+server {
+    listen 80;
+    server_name my-rag.example.com;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_cache_bypass $http_upgrade;
+
+        # These are critical for SSE (Streaming)
+        proxy_set_header Connection '';
+        proxy_buffering off;
+        chunked_transfer_encoding on;
+        proxy_read_timeout 86400; # Keep connection alive for long generations
+    }
+}
+```
+
+---
+
 ## Quick Deployment Checklist
 
 ```
