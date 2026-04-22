@@ -196,6 +196,23 @@ Triggers a background ingestion process for a directory.
 - **Incremental Logic**: If `ingestion.incremental` is true, it only processes new/modified canonical files. Unchanged files are skipped, and duplicate-content files are recorded as aliases without embedding duplicate vectors.
 - **Snapshots**: If `ingestion.save_snapshots` is true, the run writes one `storage/snapshots/ingest_job_<timestamp>.json` file. Processed entries include actual chunk text; unchanged and duplicate entries are manifest-only.
 
+### CLI safe rebuild
+When ingestion logic changes but the source file bytes are unchanged, a normal `/ingest` may skip files because the existing state file still marks them as unchanged. Use the CLI rebuild workflow instead of wiping Milvus:
+
+```bash
+python cli.py rebuild-index --config config_rag.yaml --directory ./data
+```
+
+This creates a generated rebuild config, a fresh ingestion state file, and a shadow collection such as `documents_rebuild_YYYYMMDD_HHMMSS`. After validation, use:
+
+```bash
+python cli.py promote-index \
+  --collection-name documents_rebuild_YYYYMMDD_HHMMSS \
+  --state-path storage/ingestion_state_rebuild_YYYYMMDD_HHMMSS.json
+```
+
+The promotion command prints the exact production config values to apply; it does not mutate production config automatically.
+
 ### `POST /ingestion/upload`
 Uploads a single file (PDF/HTML) and triggers ingestion.
 - **Multipart Form**: `file` (the document to upload).

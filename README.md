@@ -28,12 +28,27 @@ Edit `config_rag.yaml` to set your LLM endpoint, embedding models, and Milvus UR
 python src/my_rag/cli.py ingest --config config_rag.yaml --directory ./data/docs
 ```
 
-### 3. Querying
+### 3. Safe index rebuild
+When parser or chunker behavior changes, build a shadow collection with a fresh ingestion state instead of wiping the live collection:
+
+```bash
+python src/my_rag/cli.py rebuild-index --config config_rag.yaml --directory ./data/docs
+```
+
+After validation, print the promotion patch:
+
+```bash
+python src/my_rag/cli.py promote-index \
+  --collection-name documents_rebuild_YYYYMMDD_HHMMSS \
+  --state-path storage/ingestion_state_rebuild_YYYYMMDD_HHMMSS.json
+```
+
+### 4. Querying
 ```bash
 python src/my_rag/cli.py query --config config_rag.yaml --query "What is the main topic?"
 ```
 
-### 4. Debugging
+### 5. Debugging
 Find chunks containing a keyword:
 ```bash
 python src/my_rag/cli.py find-keyword --config config_rag.yaml --keyword "machine learning"

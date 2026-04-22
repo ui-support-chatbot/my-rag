@@ -153,6 +153,8 @@ Ingestion is incremental and content-aware:
 - Files with duplicate byte-for-byte content are skipped even when the filename or path is different.
 - Duplicate files are recorded as aliases of the canonical document in `storage/ingestion_state.json`.
 
+Use `/ingest` for normal incremental updates. If parsing or chunking behavior changes and the same source files need to be rebuilt, do not wipe the live Milvus collection first. Use the CLI-only `rebuild-index` workflow to build a shadow collection with a fresh state file, validate it, then promote it intentionally.
+
 When `save_snapshots: true`, each `/ingest` call writes one snapshot file:
 
 ```text

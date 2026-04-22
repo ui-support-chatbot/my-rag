@@ -425,20 +425,60 @@ my-rag/
 
 **To re-ingest after adding new documents:**
 ```bash
-# Just POST to /ingest again — it appends, does not overwrite existing vectors
+# Just POST to /ingest again. This is incremental and skips unchanged files.
 curl -X POST http://localhost:8000/ingest \
   -H "Content-Type: application/json" \
   -d '{"directory_path": "/app/data"}'
 ```
 
-**To wipe the vector DB and start fresh:**
+**To rebuild the index after changing parsing or chunking behavior:**
+
+Use a shadow collection instead of deleting the live Milvus data. This keeps production queries on the old collection while the new collection is built.
+
 ```bash
-docker compose down
-rm -rf ./storage/etcd ./storage/minio ./storage/milvus
-mkdir -p storage/etcd storage/minio storage/milvus
-docker compose up -d
-# Then re-ingest
+docker compose exec rag-api python cli.py rebuild-index \
+  --config /app/config_rag.yaml \
+  --directory /app/data
 ```
+
+If GPU memory is tight, stop the API first so the rebuild process does not load a second copy of the embedding models:
+
+```bash
+docker compose stop rag-api
+docker compose run --rm --no-deps rag-api python cli.py rebuild-index \
+  --config /app/config_rag.yaml \
+  --directory /app/data
+docker compose start rag-api
+```
+
+The command writes a generated rebuild config such as `/app/config_rebuild_20260422_153000.yaml`, uses a fresh state file such as `storage/ingestion_state_rebuild_20260422_153000.json`, and ingests into a shadow collection such as `documents_rebuild_20260422_153000`.
+
+Validate the rebuilt collection before promotion:
+
+```bash
+docker compose exec rag-api python cli.py debug-query \
+  --config /app/config_rebuild_20260422_153000.yaml \
+  --query "known test question" \
+  --show-stages
+```
+
+After validation, print the exact promotion patch:
+
+```bash
+docker compose exec rag-api python cli.py promote-index \
+  --collection-name documents_rebuild_20260422_153000 \
+  --state-path storage/ingestion_state_rebuild_20260422_153000.json
+```
+
+Apply the printed `collection_name` and `state_path` to `config_server.yaml`, then restart only the API:
+
+```bash
+docker compose restart rag-api
+```
+
+Rollback is just restoring the previous `collection_name` and `state_path` in `config_server.yaml`, then restarting `rag-api`.
+
+> Do not delete Milvus first for a normal rebuild. If `storage/ingestion_state.json` still says the same files are unchanged, a normal `/ingest` can skip them even after the live collection was wiped.
 
 **Backup the vector DB:**
 ```bash

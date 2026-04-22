@@ -1,10 +1,96 @@
 import argparse
 import json
 import sys
+from copy import deepcopy
+from datetime import datetime
 from pathlib import Path
 
 from pipeline import RAGPipeline
 from config import RAGConfig
+
+
+def _load_yaml(path: str) -> dict:
+    import yaml
+
+    with open(path, "r", encoding="utf-8") as f:
+        return yaml.safe_load(f) or {}
+
+
+def _write_yaml(path: Path, data: dict) -> None:
+    import yaml
+
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        yaml.safe_dump(data, f, sort_keys=False, allow_unicode=True)
+
+
+def _build_rebuild_config(
+    base_config_path: str,
+    collection_name: str = None,
+    state_path: str = None,
+    output_config: str = None,
+) -> tuple[Path, str, str]:
+    base_path = Path(base_config_path)
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+
+    base_data = _load_yaml(base_config_path)
+    rebuild_data = deepcopy(base_data)
+    ingestion = rebuild_data.setdefault("ingestion", {})
+    storage = rebuild_data.setdefault("storage", {})
+
+    base_collection = storage.get("collection_name", "documents")
+    rebuild_collection = collection_name or f"{base_collection}_rebuild_{timestamp}"
+    rebuild_state_path = state_path or f"storage/ingestion_state_rebuild_{timestamp}.json"
+    rebuild_config_path = (
+        Path(output_config)
+        if output_config
+        else base_path.with_name(f"config_rebuild_{timestamp}.yaml")
+    )
+
+    storage["collection_name"] = rebuild_collection
+    ingestion["state_path"] = rebuild_state_path
+
+    _write_yaml(rebuild_config_path, rebuild_data)
+    return rebuild_config_path, rebuild_collection, rebuild_state_path
+
+
+def _print_rebuild_next_steps(
+    rebuild_config_path: Path,
+    collection_name: str,
+    state_path: str,
+    directory: str,
+    indexed_count: int,
+) -> None:
+    print("\nRebuild index completed.")
+    print(f"Indexed chunks: {indexed_count}")
+    print(f"Source directory: {directory}")
+    print(f"Rebuild config: {rebuild_config_path}")
+    print(f"Rebuild collection: {collection_name}")
+    print(f"Rebuild state path: {state_path}")
+    print("\nValidate the rebuild collection:")
+    print(
+        "  python cli.py debug-query "
+        f"--config {rebuild_config_path} "
+        '--query "known test question" --show-stages'
+    )
+    print("\nPromote after validation:")
+    print(
+        "  python cli.py promote-index "
+        f"--collection-name {collection_name} "
+        f"--state-path {state_path}"
+    )
+    print("\nRollback remains the old collection/state from your production config.")
+
+
+def _print_promotion_instructions(collection_name: str, state_path: str) -> None:
+    print("Promotion patch to apply to the production config:")
+    print("\ningestion:")
+    print(f'  state_path: "{state_path}"')
+    print("\nstorage:")
+    print(f'  collection_name: "{collection_name}"')
+    print("\nThen restart only the API:")
+    print("  docker compose restart rag-api")
+    print("\nRollback by restoring the previous collection_name/state_path and restarting rag-api.")
 
 
 def main():
@@ -56,6 +142,33 @@ def main():
     ingest_parser.add_argument("--directory", help="Directory to ingest")
     ingest_parser.add_argument("--prefix", default="doc", help="Document ID prefix")
 
+    rebuild_parser = subparsers.add_parser(
+        "rebuild-index",
+        help="Build a shadow Milvus collection with a fresh ingestion state",
+    )
+    rebuild_parser.add_argument("--config", required=True, help="Base config YAML")
+    rebuild_parser.add_argument("--directory", required=True, help="Directory to ingest")
+    rebuild_parser.add_argument("--prefix", default="doc", help="Document ID prefix")
+    rebuild_parser.add_argument(
+        "--collection-name",
+        help="Shadow collection name. Defaults to <base>_rebuild_<timestamp>",
+    )
+    rebuild_parser.add_argument(
+        "--state-path",
+        help="Shadow ingestion state path. Defaults to storage/ingestion_state_rebuild_<timestamp>.json",
+    )
+    rebuild_parser.add_argument(
+        "--output-config",
+        help="Path for generated rebuild config. Defaults beside --config.",
+    )
+
+    promote_parser = subparsers.add_parser(
+        "promote-index",
+        help="Print production config changes for promoting a rebuilt collection",
+    )
+    promote_parser.add_argument("--collection-name", required=True)
+    promote_parser.add_argument("--state-path", required=True)
+
     inspect_chunks_parser = subparsers.add_parser("inspect-chunks", help="Inspect chunks before embedding")
     inspect_chunks_parser.add_argument("--config", required=True, help="Path to config YAML")
     inspect_chunks_parser.add_argument("--directory", required=True, help="Directory to process")
@@ -73,6 +186,35 @@ def main():
 
     if not args.command:
         parser.print_help()
+        return
+
+    if args.command == "promote-index":
+        _print_promotion_instructions(args.collection_name, args.state_path)
+        return
+
+    if args.command == "rebuild-index":
+        if not Path(args.directory).exists():
+            parser.error(f"directory does not exist: {args.directory}")
+
+        rebuild_config_path, collection_name, state_path = _build_rebuild_config(
+            base_config_path=args.config,
+            collection_name=args.collection_name,
+            state_path=args.state_path,
+            output_config=args.output_config,
+        )
+        config = RAGConfig.from_yaml(str(rebuild_config_path))
+        rag = RAGPipeline.from_config(config)
+        count = rag.ingest(
+            directory=args.directory,
+            doc_id_prefix=args.prefix,
+        )
+        _print_rebuild_next_steps(
+            rebuild_config_path=rebuild_config_path,
+            collection_name=collection_name,
+            state_path=state_path,
+            directory=args.directory,
+            indexed_count=count,
+        )
         return
 
     config = RAGConfig.from_yaml(args.config)

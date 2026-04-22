@@ -157,3 +157,6 @@ milvus.db.lock
 .ruff_cache/
 qdrant_storage/
 docs/
+config_rebuild_*.yaml
+storage/ingestion_state*.json
+storage/snapshots/
