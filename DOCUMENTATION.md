@@ -138,8 +138,8 @@ All configuration is driven by `config_rag.yaml` (local) or `config_server.yaml`
 | `ingestion` | `html_parser` | `trafilatura` | Parser for HTML files |
 | `ingestion` | `html_chunking_strategy` | `standard` | Chunking strategy for HTML files; standard uses `chunk_size` and `chunk_overlap` |
 | `embedding` | `device` | `cuda:0` | Default GPU for embedding models |
-| `embedding` | `dense_device` | `cuda:0` | Explicit GPU for Dense model |
-| `embedding` | `sparse_device` | `cpu` | Device for Sparse query encoding |
+| `embedding` | `dense_device` | `cuda:1` | Explicit GPU for Dense model |
+| `embedding` | `sparse_device` | `cuda:0` | Device for Sparse query encoding |
 | `retrieval` | `reranker_endpoint` | `http://127.0.0.1:8012/v1/rerank` | llama.cpp reranking endpoint |
 | `retrieval` | `k` | `50` | Candidate pool size fetched from Milvus |
 | `retrieval` | `rerank_top_k` | `5` | Docs passed to the LLM after reranking |

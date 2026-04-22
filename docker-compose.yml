@@ -93,14 +93,14 @@ services:
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
     # ── GPU Configuration ──────────────────────────────────────────────────
-    # GPU 0: Dense (Harrier) + Sparse (OpenSearch) embedding models
-    # GPU 1: reserved for the dedicated reranker service
+    # Expose both GPUs to the API container.
+    # Dense runs on cuda:1 and sparse runs on cuda:0 in config_server.yaml.
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: [ '0' ]
+              device_ids: [ '0', '1' ]
               capabilities: [ gpu ]
 
     # ── Docker 20.10 Security Workarounds ─────────────────────────────────
