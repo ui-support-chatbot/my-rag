@@ -394,7 +394,16 @@ If deploying on GTX 1080/1070 (Pascal Architecture), use these specific rules fo
 
 ### 9.2 GGUF Reranker Service
 
-Run the reranker as a separate llama.cpp server so the Python app only calls HTTP:
+Run the reranker as a separate llama.cpp server so the Python app only calls HTTP.
+In the current Compose setup, the service is opt-in via the `reranker` profile, so it will not start unless you ask for it:
+
+```bash
+docker compose --profile reranker up -d reranker
+```
+
+If `retrieval.reranker_model: null` is set in `config_server.yaml`, you can leave the reranker service stopped and the API will skip reranking.
+
+If you do enable it, run the reranker as a separate llama.cpp server so the Python app only calls HTTP:
 
 ```bash
 llama-server \
@@ -407,7 +416,7 @@ llama-server \
   -ngl all
 ```
 
-The API client uses `http://127.0.0.1:8012/v1/rerank` and sends `query`, `documents`, `top_n`, and `model`.
+The API client uses `http://127.0.0.1:8012/v1/rerank` and sends `query`, `documents`, and `top_n`.
 
 ## 10. Persistence & Data Management
 

@@ -36,6 +36,7 @@ http://152.118.31.54:8000/docs
 - The streaming endpoint returns Server-Sent Events.
 - Ingestion runs in the background, so the response comes back before processing finishes.
 - Normal ingestion writes one job-level chunk snapshot when `save_snapshots` is enabled.
+- Reranking is optional in the server deployment. If `retrieval.reranker_model` is `null` in `config_server.yaml`, the API skips reranker use and you do not need to start the reranker container.
 
 ## Health And Storage
 
@@ -81,7 +82,7 @@ Example response:
 ## Query
 
 ### `POST /query`
-Run a standard RAG query. The server retrieves candidates, reranks them, and returns a grounded answer.
+Run a standard RAG query. If reranking is enabled in the active config, the server retrieves candidates, reranks them, and returns a grounded answer.
 
 Request body:
 
@@ -228,6 +229,7 @@ curl -X POST http://152.118.31.54:8000/debug/retrieve \
 
 ### `POST /debug/rerank`
 Inspect the reranked candidates before the LLM answer is generated.
+This endpoint only works when the reranker service is deployed and the active config points to it.
 
 ```bash
 curl -X POST http://152.118.31.54:8000/debug/rerank \
