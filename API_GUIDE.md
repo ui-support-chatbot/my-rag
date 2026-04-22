@@ -213,7 +213,7 @@ curl -X POST http://152.118.31.54:8000/debug/chunks \
   -d '{"directory_path":"/app/data","save_to_file":false,"output_format":"json"}'
 ```
 
-Useful when you want to verify whether hierarchical chunking is producing the size and boundaries you expect.
+Useful when you want to verify chunk boundaries before embedding. PDFs use hierarchical chunking; HTML uses standard overlapping text chunks.
 
 ### `POST /debug/retrieve`
 Inspect the raw retrieval output after hybrid search and RRF fusion, before reranking.

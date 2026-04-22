@@ -18,36 +18,63 @@ class IngestionPipeline:
         chunk_size: int = 512,
         chunk_overlap: int = 50,
         embedding_model: str = "microsoft/harrier-oss-v1-0.6b",
-        chunking_strategy: str = "hierarchical",
         pdf_parser: str = "docling",
-        html_parser: str = "docling",
+        pdf_chunking_strategy: str = "hierarchical",
+        html_parser: str = "trafilatura",
+        html_chunking_strategy: str = "standard",
     ):
-        if chunking_strategy != "hierarchical":
+        self.pdf_parser = pdf_parser.lower()
+        self.pdf_chunking_strategy = pdf_chunking_strategy.lower()
+        self.html_parser = html_parser.lower()
+        self.html_chunking_strategy = html_chunking_strategy.lower()
+        if self.pdf_chunking_strategy != "hierarchical":
             logger.warning(
-                "Configured chunking_strategy=%s, but this pipeline uses "
-                "Docling HierarchicalChunker. Treating it as 'hierarchical'.",
-                chunking_strategy,
+                "Configured pdf_chunking_strategy=%s, but PDF ingestion uses "
+                "Docling HierarchicalChunker.",
+                pdf_chunking_strategy,
             )
-        self.pdf_parser = pdf_parser
-        self.html_parser = html_parser
-        self.chunking_strategy = "hierarchical"
+            self.pdf_chunking_strategy = "hierarchical"
+        if self.html_chunking_strategy not in {"hierarchical", "standard"}:
+            raise ValueError(
+                "html_chunking_strategy must be either 'hierarchical' or 'standard'"
+            )
         self.chunker = Chunker(
             embedding_model=embedding_model,
             chunk_size=chunk_size,
             chunk_overlap=chunk_overlap,
         )
+        self.html_text_parser = HTMLParser()
 
     def process_file(self, file_path: str, doc_id: str = None) -> List[ChunkRecord]:
+        ext = os.path.splitext(file_path)[1].lower()
+        external_metadata = self._load_external_metadata(file_path)
+
+        if HTMLParser.accepts_extension(ext) and self.html_chunking_strategy == "standard":
+            if doc_id is None:
+                doc_id = os.path.splitext(os.path.basename(file_path))[0]
+
+            logger.info(
+                "Parsing HTML with %s and standard text chunking: %s",
+                self.html_parser,
+                file_path,
+            )
+            text = self.html_text_parser.extract(file_path)
+            return self.chunker.chunk_text(
+                text,
+                filename=file_path,
+                doc_id=doc_id,
+                external_metadata=external_metadata,
+            )
+
         from docling.document_converter import DocumentConverter, PdfFormatOption
         from docling.datamodel.base_models import InputFormat
         from docling.datamodel.pipeline_options import (
-            PdfPipelineOptions, 
-            RapidOcrOptions, 
-            TableStructureOptions, 
-            TableFormerMode
+            PdfPipelineOptions,
+            RapidOcrOptions,
+            TableFormerMode,
         )
         from pathlib import Path
-        
+
         # 1. Primary Configuration: High quality with Table extraction (FAST mode for stability)
         pipeline_options = PdfPipelineOptions()
         pipeline_options.do_table_structure = True # We want tables!
@@ -84,10 +111,15 @@ class IngestionPipeline:
         if doc_id is None:
             doc_id = os.path.splitext(os.path.basename(file_path))[0]
 
-        # --- Load External Metadata ---
+        # Pass findings to the Chunker
+        chunks = self.chunker.chunk(doc, filename=file_path, doc_id=doc_id, external_metadata=external_metadata)
+
+        return chunks
+
+    def _load_external_metadata(self, file_path: str) -> dict:
         external_metadata = {}
         dir_path = os.path.dirname(file_path)
-        
+
         # 1. Look for page.meta.json in same dir
         page_meta_path = os.path.join(dir_path, "page.meta.json")
         if os.path.exists(page_meta_path):
@@ -105,11 +137,7 @@ class IngestionPipeline:
                     external_metadata.update(json.load(f))
             except Exception as e:
                 logger.warning(f"Error loading {file_meta_path}: {e}")
-
-        # Pass findings to the Chunker
-        chunks = self.chunker.chunk(doc, filename=file_path, doc_id=doc_id, external_metadata=external_metadata)
-
-        return chunks
+        return external_metadata
 
     def process_directory(
         self, directory: str, extensions: List[str] = None

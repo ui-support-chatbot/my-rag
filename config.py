@@ -6,9 +6,10 @@ from typing import List, Optional
 class IngestionConfig:
     chunk_size: int = 512
     chunk_overlap: int = 50
-    chunking_strategy: str = "hierarchical"
     pdf_parser: str = "docling"
-    html_parser: str = "docling"
+    pdf_chunking_strategy: str = "hierarchical"
+    html_parser: str = "trafilatura"
+    html_chunking_strategy: str = "standard"
     save_snapshots: bool = False
     incremental: bool = True
     state_path: str = "storage/ingestion_state.json"
@@ -93,8 +94,14 @@ class RAGConfig:
         with open(path, "r") as f:
             data = yaml.safe_load(f) or {}
 
+        ingestion_data = dict(data.get("ingestion", {}))
+        legacy_chunking_strategy = ingestion_data.pop("chunking_strategy", None)
+        if legacy_chunking_strategy is not None:
+            ingestion_data.setdefault("pdf_chunking_strategy", legacy_chunking_strategy)
+            ingestion_data.setdefault("html_chunking_strategy", legacy_chunking_strategy)
+
         return cls(
-            ingestion=IngestionConfig(**data.get("ingestion", {})),
+            ingestion=IngestionConfig(**ingestion_data),
             embedding=EmbeddingConfig(**data.get("embedding", {})),
             storage=StorageConfig(**data.get("storage", {})),
             retrieval=RetrievalConfig(**data.get("retrieval", {})),

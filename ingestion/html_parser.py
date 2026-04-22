@@ -18,7 +18,11 @@ class HTMLParser(BaseParser):
             with open(file_path, "r", encoding="utf-8") as f:
                 html = f.read()
             text = trafilatura.extract(html, include_images=True, output_format="text")
-            return text or ""
+            if text:
+                return text
+
+            logger.warning("Trafilatura produced no text for %s, using BeautifulSoup fallback", file_path)
+            return self._fallback_extract(file_path)
         except ImportError:
             logger.warning("Trafilatura not available, using BeautifulSoup fallback")
             return self._fallback_extract(file_path)

@@ -6,7 +6,7 @@ logger = logging.getLogger(__name__)
 
 
 class Chunker:
-    """Hierarchical chunker using Docling structure-aware splitting."""
+    """Chunk Docling documents and plain extracted text."""
 
     def __init__(
         self,
@@ -14,8 +14,8 @@ class Chunker:
         chunk_size: int = 512,
         chunk_overlap: int = 50,
     ):
-        from docling.chunking import HierarchicalChunker
-
+        self.chunk_size = max(1, chunk_size)
+        self.chunk_overlap = max(0, min(chunk_overlap, self.chunk_size - 1))
         if chunk_overlap:
             logger.debug(
                 "chunk_overlap=%s is ignored by Docling HierarchicalChunker.",
@@ -26,21 +26,32 @@ class Chunker:
             "config visibility, but splitting follows document structure.",
             chunk_size,
         )
-        self.chunker = HierarchicalChunker()
+        self.chunker = None
 
-    def chunk(self, docling_doc, filename: str, doc_id: str = "", external_metadata: dict = None) -> List[ChunkRecord]:
+    def chunk(
+        self,
+        docling_doc,
+        filename: str,
+        doc_id: str = "",
+        external_metadata: dict = None,
+    ) -> List[ChunkRecord]:
         """
         Use HierarchicalChunker to preserve document structure.
         """
+        from docling.chunking import HierarchicalChunker
+
         if external_metadata is None:
             external_metadata = {}
+        if self.chunker is None:
+            self.chunker = HierarchicalChunker()
 
         chunks = []
-        
-        # Extract source signals for the breadcrumb
-        domain = external_metadata.get("domain", "")
         # Priority: pdf_url > source_url > page_url
-        source_url = external_metadata.get("pdf_url") or external_metadata.get("source_url") or external_metadata.get("page_url", "")
+        source_url = (
+            external_metadata.get("pdf_url")
+            or external_metadata.get("source_url")
+            or external_metadata.get("page_url", "")
+        )
 
         for chunk in self.chunker.chunk(docling_doc):
             chunk_text = chunk.text
@@ -74,4 +85,61 @@ class Chunker:
                 )
             )
 
+        return chunks
+
+    def chunk_text(
+        self,
+        text: str,
+        filename: str,
+        doc_id: str = "",
+        external_metadata: dict = None,
+    ) -> List[ChunkRecord]:
+        """Split plain text into overlapping chunks using configured token-like units."""
+        if external_metadata is None:
+            external_metadata = {}
+
+        normalized_text = "\n".join(
+            line.strip() for line in text.splitlines() if line.strip()
+        )
+        if not normalized_text:
+            return []
+
+        source_url = (
+            external_metadata.get("pdf_url")
+            or external_metadata.get("source_url")
+            or external_metadata.get("page_url", "")
+        )
+
+        records = []
+        for chunk_text in self._split_text(normalized_text):
+            metadata = dict(external_metadata)
+            metadata["source_url"] = source_url
+            metadata["chunking_strategy"] = "standard_text"
+
+            records.append(
+                ChunkRecord(
+                    text=chunk_text,
+                    doc_id=doc_id or os.path.splitext(os.path.basename(filename))[0],
+                    chunk_index=len(records),
+                    breadcrumb="",
+                    page_number=None,
+                    filename=filename,
+                    metadata=metadata,
+                )
+            )
+
+        return records
+
+    def _split_text(self, text: str) -> List[str]:
+        return self._split_tokens(text.split())
+
+    def _split_tokens(self, tokens: List[str]) -> List[str]:
+        chunks = []
+        step = self.chunk_size - self.chunk_overlap
+        for start in range(0, len(tokens), step):
+            chunk_tokens = tokens[start : start + self.chunk_size]
+            if chunk_tokens:
+                chunks.append(" ".join(chunk_tokens))
+            if start + self.chunk_size >= len(tokens):
+                break
         return chunks

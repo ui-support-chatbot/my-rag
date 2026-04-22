@@ -67,9 +67,10 @@ class RAGPipeline:
             chunk_size=config.ingestion.chunk_size,
             chunk_overlap=config.ingestion.chunk_overlap,
             embedding_model=config.embedding.dense_model,
-            chunking_strategy=config.ingestion.chunking_strategy,
             pdf_parser=config.ingestion.pdf_parser,
+            pdf_chunking_strategy=config.ingestion.pdf_chunking_strategy,
             html_parser=config.ingestion.html_parser,
+            html_chunking_strategy=config.ingestion.html_chunking_strategy,
         )
         self.dense_model = dense_model or DenseEmbeddingModel(
             model_name=config.embedding.dense_model,
@@ -475,7 +476,12 @@ class RAGPipeline:
             },
             "config": {
                 "incremental": self.config.ingestion.incremental,
-                "chunking_strategy": self.config.ingestion.chunking_strategy,
+                "pdf_parser": self.config.ingestion.pdf_parser,
+                "pdf_chunking_strategy": self.config.ingestion.pdf_chunking_strategy,
+                "html_parser": self.config.ingestion.html_parser,
+                "html_chunking_strategy": self.config.ingestion.html_chunking_strategy,
+                "chunk_size": self.config.ingestion.chunk_size,
+                "chunk_overlap": self.config.ingestion.chunk_overlap,
                 "dense_model": self.config.embedding.dense_model,
                 "sparse_model": self.config.embedding.sparse_model,
                 "collection_name": self.config.storage.collection_name,

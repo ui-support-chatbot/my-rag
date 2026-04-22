@@ -15,13 +15,12 @@ Unlike "black-box" RAG frameworks, MyRAG prioritizes **explainability**, allowin
 To ensure high-quality text extraction and structural preservation, we use a sophisticated ingestion strategy:
 
 - **Parsing**:
-  - **All Formats (PDF, HTML, etc.)**: `Docling` (by IBM). Docling is used exclusively across all ingestion formats because it natively identifies layout structures (tables, headers, formulas) and outputs a strictly typed `DoclingDocument`. 
-  - *Note on Trafilatura*: We previously used `Trafilatura` for HTML boilerplate removal. However, because our advanced `HybridChunker` specifically requires the hierarchical node metadata inside a `DoclingDocument` to function correctly, we deprecated custom flat-text parsers. Docling handles HTML natively while preserving the required structural geometry.
+  - **PDF**: `Docling` (by IBM). Docling identifies layout structures such as tables and headers, then outputs a strictly typed `DoclingDocument`.
+  - **HTML**: `Trafilatura` with a BeautifulSoup fallback. HTML pages are treated as web text because many scraped pages convert successfully in Docling but produce no chunkable structure.
 - **Chunking**:
-  - We use `docling.chunking.HierarchicalChunker`. 
-  - This focuses strictly on the document's organizational hierarchy (headers, sections, lists) to produce segments that map human-logical boundaries.
-  - Each chunk is **contextualized** (prepended with its heading hierarchy), providing critical context for retrieval.
-  - `ChunkRecord`s include a **breadcrumb** (e.g., `"Introduction > Methods > Data Collection"`) and exact **page numbers**.
+  - PDFs use `docling.chunking.HierarchicalChunker`.
+  - HTML uses the standard overlapping text chunker controlled by `ingestion.chunk_size` and `ingestion.chunk_overlap`.
+  - PDF `ChunkRecord`s can include Docling metadata such as page numbers. HTML `ChunkRecord`s keep external crawl metadata such as `source_url`, `domain`, and `scraped_at`.
   - **Job-Level Snapshots**: For debugging, normal ingestion can save one JSON snapshot per ingestion job to `storage/snapshots/ingest_job_<timestamp>.json`. This is controlled by `ingestion.save_snapshots` in the config. Processed files include their actual chunk text in the snapshot; unchanged and duplicate files are represented as manifest entries for efficiency.
   - **Network Configuration**: To bypass host firewall (UFW) blockers that often drop packets from the Docker bridge to the host IP, we use `network_mode: host`. This removes Docker-network isolation for this container and allows it to talk to `localhost:11434` (Ollama) and `localhost:19530` (Milvus) with zero firewall interference.
 
@@ -117,7 +116,7 @@ For a responsive user experience, the system supports real-time token streaming:
 ## 4. Pipeline Data Flow
 
 ### Ingestion Flow
-`Raw Files` -> `SHA-256 Fingerprint Scan` -> `Incremental/Duplicate Classification` -> `Docling Parsing for New/Modified Canonical Files` -> `Hierarchical Chunking` -> `Dense & Sparse Embedding` -> `Milvus Storage` -> `Job Snapshot Manifest`
+`Raw Files` -> `SHA-256 Fingerprint Scan` -> `Incremental/Duplicate Classification` -> `PDF: Docling + Hierarchical Chunking / HTML: Trafilatura + Standard Text Chunking` -> `Dense & Sparse Embedding` -> `Milvus Storage` -> `Job Snapshot Manifest`
 
 ### Query Flow
 `User Query` -> `Dual Embedding` -> `Milvus Hybrid Search` -> `Metadata Filtering (Optional)` -> `RRF (k=60)` -> `Top-50 Candidates` -> `Jina Reranking` -> `Top-5 Context` -> `Grounded Generation` -> `Answer + Sources`
@@ -132,8 +131,12 @@ All configuration is driven by `config_rag.yaml` (local) or `config_server.yaml`
 
 | Section | Parameter | Default | Description |
 |---|---|---|---|
-| `ingestion` | `chunk_size` | `512` | Max tokens per chunk (Harrier tokenizer) |
+| `ingestion` | `chunk_size` | `512` | Max token-like units per standard text chunk; Docling hierarchical PDF chunks follow document structure |
+| `ingestion` | `chunk_overlap` | `50` | Overlap for standard text chunks, used by HTML ingestion |
 | `ingestion` | `pdf_parser` | `docling` | Parser for PDF files |
+| `ingestion` | `pdf_chunking_strategy` | `hierarchical` | Chunking strategy for PDF files; currently uses Docling `HierarchicalChunker` |
+| `ingestion` | `html_parser` | `trafilatura` | Parser for HTML files |
+| `ingestion` | `html_chunking_strategy` | `standard` | Chunking strategy for HTML files; standard uses `chunk_size` and `chunk_overlap` |
 | `embedding` | `device` | `cuda:0` | Default GPU for embedding models |
 | `embedding` | `dense_device` | `cuda:0` | Explicit GPU for Dense model |
 | `embedding` | `sparse_device` | `cpu` | Device for Sparse query encoding |
@@ -334,7 +337,7 @@ The following optimizations were implemented to stabilize the pipeline for produ
 - **Latency Impact**: Query latency is lower because there is no unload/reload churn between requests.
 - **Optimization**: The reranker is the only remaining memory-sensitive stage; run it as a dedicated GGUF service.
 
-- **Fix**: Centralized all parsing (PDF, HTML, DOCX) into the `Docling` `DocumentConverter`. This ensures every chunk retains its structural metadata (breadcrumbs) which is vital for the RAG reranking stage.
+- **Fix**: PDFs are parsed through Docling for structure and table handling. HTML is parsed through Trafilatura/BeautifulSoup and chunked as plain web text to avoid Docling HTML conversions that produce no chunkable document items.
 
 ### G. Multi-GPU Distribution Strategy
 To support 8GB VRAM cards alongside a local LLM, the system implements **Spatial Deconfliction**:
@@ -363,11 +366,11 @@ To improve performance, reduce LLM costs, and ensure 100% accuracy for strictly 
 
 ## 11. Known Issues & Configuration Discrepancies
 
-As of April 2026, there are several areas where the configuration files (`config_rag.yaml`, `config_server.yaml`) do not yet fully connect to the underlying implementation. These are tracked as critical technical debt:
+As of April 2026, there are several areas where ingestion and model limits still need care:
 
 ### A. Chunker Configuration (`chunk_size` & `chunk_overlap`)
-- **Issue**: The `HierarchicalChunker` (based on Docling) in `ingestion/chunker.py` currently ignores the `chunk_size` and `chunk_overlap` parameters passed to its constructor.
-- **Impact**: Changing `chunk_size` in your YAML files will not actually change the size of the chunks generated during ingestion. The chunker currently relies strictly on document structural boundaries (headings, paragraphs).
+- **Issue**: The `HierarchicalChunker` used for PDF Docling documents ignores the `chunk_size` and `chunk_overlap` parameters passed to its constructor.
+- **Impact**: Changing `chunk_size` in your YAML files affects HTML standard text chunks, but not PDF hierarchical chunks. PDF chunking still relies on document structural boundaries.
 - **Planned Fix**: Initialize the `HierarchicalChunker` with a `HuggingFaceTokenizer` and a `max_tokens` constraint to bridge this gap.
 
 ### B. Embedding Model Context Limits
