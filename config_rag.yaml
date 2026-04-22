@@ -2,12 +2,16 @@
 
 # Ingestion settings
 ingestion:
-  chunk_size: 8000
-  chunk_overlap: 50
-  chunking_strategy: "fixed"  # or "semantic"
+  # NOTE: When chunking_strategy is "hierarchical", Docling's
+  # HierarchicalChunker ignores chunk_size and chunk_overlap.
+  # Chunks follow document structure instead of a fixed token budget.
+  chunk_size: 1000
+  chunk_overlap: 200
+  chunking_strategy: "hierarchical"
   pdf_parser: "docling"
-  html_parser: "trafilatura"
+  html_parser: "docling"
   save_snapshots: true  # Automatically save chunks to storage/snapshots before embedding
+  incremental: true
 
 # Embedding models
 embedding:

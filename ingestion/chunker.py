@@ -2,14 +2,11 @@ from typing import List
 from ingestion.base import ChunkRecord
 import logging
 import os
-from transformers import AutoTokenizer
-from docling_core.transforms.chunker.tokenizer.huggingface import HuggingFaceTokenizer
-
 logger = logging.getLogger(__name__)
 
 
 class Chunker:
-    """Hybrid chunker using Docling for token-aware, structure-aware splitting."""
+    """Hierarchical chunker using Docling structure-aware splitting."""
 
     def __init__(
         self,
@@ -19,14 +16,21 @@ class Chunker:
     ):
         from docling.chunking import HierarchicalChunker
 
-        # TODO: The HierarchicalChunker currently ignores chunk_size and chunk_overlap.
-        # It relies strictly on document structure (headings, etc.).
-        # Fix planned: Initialize with HuggingFaceTokenizer and max_tokens.
+        if chunk_overlap:
+            logger.debug(
+                "chunk_overlap=%s is ignored by Docling HierarchicalChunker.",
+                chunk_overlap,
+            )
+        logger.info(
+            "Using Docling HierarchicalChunker. chunk_size=%s is retained for "
+            "config visibility, but splitting follows document structure.",
+            chunk_size,
+        )
         self.chunker = HierarchicalChunker()
 
     def chunk(self, docling_doc, filename: str, doc_id: str = "", external_metadata: dict = None) -> List[ChunkRecord]:
         """
-        Use HybridChunker to preserve document structure and provide contextualized text.
+        Use HierarchicalChunker to preserve document structure.
         """
         if external_metadata is None:
             external_metadata = {}

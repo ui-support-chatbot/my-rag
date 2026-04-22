@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import List, Optional, Dict, Any
 import logging
+import os
 
 logger = logging.getLogger(__name__)
 
@@ -66,10 +67,10 @@ class MilvusClient:
 
     def delete_by_source(self, collection_name: str, source_path: str) -> Any:
         """Delete all chunks associated with a specific source path."""
-        # Clean up path to ensure match (absolute vs relative depends on how it was stored)
-        # We store the path precisely as it was provided during ingestion.
-        filter_expr = f'source == "{source_path}"'
-        logger.info(f"Deleting existing chunks for source: {source_path}")
+        normalized_path = os.path.abspath(source_path)
+        escaped_path = normalized_path.replace("\\", "\\\\").replace('"', '\\"')
+        filter_expr = f'source == "{escaped_path}"'
+        logger.info(f"Deleting existing chunks for source: {normalized_path}")
         return self._client.delete(collection_name=collection_name, filter=filter_expr)
 
     def query(

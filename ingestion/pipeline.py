@@ -18,13 +18,19 @@ class IngestionPipeline:
         chunk_size: int = 512,
         chunk_overlap: int = 50,
         embedding_model: str = "microsoft/harrier-oss-v1-0.6b",
-        chunking_strategy: str = "fixed",
+        chunking_strategy: str = "hierarchical",
         pdf_parser: str = "docling",
         html_parser: str = "docling",
     ):
+        if chunking_strategy != "hierarchical":
+            logger.warning(
+                "Configured chunking_strategy=%s, but this pipeline uses "
+                "Docling HierarchicalChunker. Treating it as 'hierarchical'.",
+                chunking_strategy,
+            )
         self.pdf_parser = pdf_parser
         self.html_parser = html_parser
-        self.chunking_strategy = chunking_strategy
+        self.chunking_strategy = "hierarchical"
         self.chunker = Chunker(
             embedding_model=embedding_model,
             chunk_size=chunk_size,

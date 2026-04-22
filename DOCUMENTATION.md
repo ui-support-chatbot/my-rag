@@ -33,7 +33,7 @@ We implement a **Hybrid Retrieval** strategy using a **Dual-Routing** architectu
 
 A decoder-only multilingual embedding model (Qwen-based) using last-token pooling.
 
-- **Ingestion Path**: Documents are embedded plainly using `embed_documents()` — no instruction prompt.
+- **Ingestion Path**: Documents are embedded plainly using `embed_documents()` - no instruction prompt.
 - **Query Path**: Queries use `embed_query()` which automatically applies the `web_search_query` instruction prompt. This alignment is critical: the model was trained to identify relevant passages specifically when prompted with a task instruction.
 
 #### 2. Sparse Strategy: `opensearch-project/opensearch-neural-sparse-encoding-doc-v3-gte`
@@ -48,11 +48,11 @@ An **Asymmetric, Inference-Free** learned sparse retriever.
 After both searches return their top-k candidates, we fuse them using **Custom RRF**:
 
 ```
-score(d) = Σ  1 / (k + rank_i)
+score(d) = sum(1 / (k + rank_i))
 ```
 
 - `k = 60` (the standard constant from the original RRF paper).
-- Dense and sparse rank lists are merged — documents appearing in both lists get a higher combined score.
+- Dense and sparse rank lists are merged - documents appearing in both lists get a higher combined score.
 - The result is a single sorted candidate pool (typically top-50) passed to the reranker.
 
 ### D. Reranking
@@ -114,10 +114,10 @@ For a responsive user experience, the system supports real-time token streaming:
 ## 4. Pipeline Data Flow
 
 ### Ingestion Flow
-`Raw Files` → `Docling/Trafilatura Parsing` → `Hybrid Chunking` → `Batch Dense & Sparse Embedding` → `Milvus Storage (with Breadcrumbs & Page Nos)`
+`Raw Files` -> `Docling Parsing` -> `Hierarchical Chunking` -> `Per-file Dense & Sparse Embedding` -> `Milvus Storage (with Breadcrumbs & Page Nos)`
 
 ### Query Flow
-`User Query` → `Dual Embedding` → `Milvus Hybrid Search` → `Metadata Filtering (Optional)` → `RRF (k=60)` → `Top-50 Candidates` → `Jina Reranking` → `Top-5 Context` → `Grounded Generation` → `Answer + Sources`
+`User Query` -> `Dual Embedding` -> `Milvus Hybrid Search` -> `Metadata Filtering (Optional)` -> `RRF (k=60)` -> `Top-50 Candidates` -> `Jina Reranking` -> `Top-5 Context` -> `Grounded Generation` -> `Answer + Sources`
 
 ---
 
@@ -313,8 +313,8 @@ The following optimizations were implemented to stabilize the pipeline for produ
 
 | **Issue** | **Root Cause** | **Resolution** |
 |---|---|---|
-| `CUDA out of memory` during ingestion | SPLADE model vocabulary expansion (30k dims) is too large for batch size 32 | Lower `batch_size` to `16` or `4` in `config_server.yaml` ✅ |
-| **Increased Query Latency** | Model reload churn to save VRAM | This is no longer used. Dense/sparse embeddings stay loaded, and the reranker is a separate service. ✅ |
+| `CUDA out of memory` during ingestion | SPLADE model vocabulary expansion (30k dims) is too large for batch size 32 | Lower `batch_size` to `16` or `4` in `config_server.yaml` |
+| **Increased Query Latency** | Model reload churn to save VRAM | This is no longer used. Dense/sparse embeddings stay loaded, and the reranker is a separate service. |
 
 ### D. GPU Memory Competition Issue
 - **Problem**: When running the RAG system in Docker with GPU access, the reranker alone can consume most of GPU 1. In older deployments, Ollama could also compete for VRAM, but the reranker is the stage that explains the 7 GB spike you observed.
@@ -352,7 +352,7 @@ To improve performance, reduce LLM costs, and ensure 100% accuracy for strictly 
    - The user's query is embedded.
    - We perform a cosine similarity search against `faq_collection`.
    - **Threshold Match (> 0.90)**: The semantic router SHORT-CIRCUITS the pipeline. The verified answer is returned instantly (~0.1s latency). No chunks are fetched, Jina is not invoked, and the generation LLM is completely bypassed.
-   - **Fallback (< 0.90)**: The query proceeds through the normal Dual-Routing architecture (Dense + Sparse → RRF → Reranker → LLM).
+   - **Fallback (< 0.90)**: The query proceeds through the normal Dual-Routing architecture (Dense + Sparse -> RRF -> Reranker -> LLM).
 3. **Automated Bootstrapping**: Utilizing the existing `SyntheticQAGenerator` module to crawl regulatory PDFs, generate anticipated Q&A pairs, and stage them for human review before insertion into the `faq_collection`.
 
 ---
@@ -375,4 +375,9 @@ As of April 2026, there are several areas where the configuration files (`config
 - **Issue**: The reranker model supports 8,192 tokens, but the `llama.cpp` server defaults to a smaller context window if not explicitly overridden. 
 - **Impact**: Even if your chunks are 8k tokens, the reranker might only "see" the first 512 of them.
 - **Fix**: The `-c 8192` flag in `docker-compose.yml` addresses this.
+
+### D. Ingestion Failure Isolation
+- **Current Behavior**: Ingestion is file-scoped. Each file is parsed, embedded, inserted, and marked successful independently.
+- **Retry Behavior**: Dense and sparse embedding batches retry with smaller batch sizes after failures such as CUDA OOM. If one file still fails, the run logs that file as failed and continues with the remaining files.
+- **Summary Logs**: Each run logs indexed chunks, successful files, failed files, skipped unchanged files, and per-file failure details.
 

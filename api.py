@@ -298,7 +298,10 @@ def _background_ingestion(directory: str) -> None:
         return
     try:
         logger.info(f"Background ingestion started for: {directory}")
-        rag_pipeline.ingest(directory=directory)  # keyword arg — matches pipeline signature
+        if os.path.isfile(directory):
+            rag_pipeline.ingest(paths=[directory])
+        else:
+            rag_pipeline.ingest(directory=directory)
         logger.info(f"Background ingestion completed for: {directory}")
     except Exception as e:
         logger.error(f"Background ingestion failed: {e}", exc_info=True)

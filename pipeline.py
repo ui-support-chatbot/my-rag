@@ -37,6 +37,15 @@ class RAGResult:
     metadata: Dict[str, Any] = field(default_factory=dict)
 
 
+@dataclass
+class IngestionRunSummary:
+    indexed_chunks: int = 0
+    successful_files: int = 0
+    failed_files: int = 0
+    skipped_files: int = 0
+    failures: List[Dict[str, str]] = field(default_factory=list)
+
+
 class RAGPipeline:
     """Main RAG pipeline combining all components."""
 
@@ -112,111 +121,169 @@ class RAGPipeline:
         """Ingest documents into the vector store using batch embedding (Incremental)."""
         collection_name = self.config.storage.collection_name
         self.storage.create_collection(collection_name, self.dense_model.dimension)
+        return self._ingest_resilient(paths, directory, doc_id_prefix, collection_name)
 
-        # ── 1. Scopes & Filter ────────────────────────────────────────────────
+
+    def _ingest_resilient(
+        self,
+        paths: List[str],
+        directory: str,
+        doc_id_prefix: str,
+        collection_name: str,
+    ) -> int:
         all_file_paths = []
         if paths:
             all_file_paths.extend(paths)
         if directory:
-            for root, _, files in os.walk(directory):
-                for file in files:
-                    if any(file.endswith(ext) for ext in [".pdf", ".html", ".htm"]):
-                        all_file_paths.append(os.path.join(root, file))
+            if os.path.isfile(directory):
+                all_file_paths.append(directory)
+            else:
+                for root, _, files in os.walk(directory):
+                    for file in files:
+                        if any(file.lower().endswith(ext) for ext in [".pdf", ".html", ".htm"]):
+                            all_file_paths.append(os.path.join(root, file))
 
-        # Filter out unchanged files if incremental is enabled
+        summary = IngestionRunSummary()
         files_to_process = []
         if self.config.ingestion.incremental:
             for path in all_file_paths:
                 status = self.ingestion_state.get_file_status(path)
                 if status == "unchanged":
                     logger.info(f"Skipping {path}: No changes detected (Incremental)")
+                    summary.skipped_files += 1
                 else:
-                    if status == "modified":
-                        logger.info(f"File modified: {path}. Old chunks will be replaced.")
-                        self.storage.delete_by_source(collection_name, path)
-                    files_to_process.append(path)
+                    files_to_process.append((path, status))
         else:
-            files_to_process = all_file_paths
+            files_to_process = [(path, "new") for path in all_file_paths]
 
         if not files_to_process:
             logger.info("Nothing to ingest. Everything is up to date.")
             return 0
 
-        # ── 2. Parse & Chunk ──────────────────────────────────────────────────
-        chunks = []
-        for i, path in enumerate(files_to_process):
-            doc_id = f"{doc_id_prefix}_{i:03d}"
+        batch_size = max(1, self.config.embedding.batch_size)
+        total_files = len(files_to_process)
+        logger.info(
+            f"Starting ingestion: {total_files} file(s), "
+            f"batch_size={batch_size}, skipped={summary.skipped_files}"
+        )
+
+        for index, (path, status) in enumerate(files_to_process):
+            doc_id = f"{doc_id_prefix}_{index:03d}"
             try:
+                logger.info(f"[{index + 1}/{total_files}] Processing {path} ({status})")
                 file_chunks = self.ingestion.process_file(path, doc_id=doc_id)
-                chunks.extend(file_chunks)
+                if not file_chunks:
+                    raise ValueError("No chunks produced")
+
+                if self.config.ingestion.save_snapshots:
+                    self.save_chunks_before_embedding(
+                        chunks=file_chunks,
+                        output_prefix=f"ingest_{Path(path).stem}",
+                    )
+
+                records = self._embed_chunks_with_retry(file_chunks, batch_size)
+
+                # Delete old or partial rows only after replacement vectors are ready.
+                self.storage.delete_by_source(collection_name, path)
+                self.storage.insert(collection_name, records)
+                self.ingestion_state.update_file(
+                    file_path=path,
+                    doc_id=doc_id,
+                    chunk_count=len(records),
+                )
+
+                summary.indexed_chunks += len(records)
+                summary.successful_files += 1
+                logger.info(f"Indexed {len(records)} chunk(s) from {path}")
             except Exception as e:
-                logger.error(f"Failed to process {path}: {e}")
+                summary.failed_files += 1
+                summary.failures.append({"path": path, "error": str(e)})
+                logger.error(f"Failed to ingest {path}: {e}", exc_info=True)
+                self._clear_cuda_cache()
 
-        if not chunks:
-            logger.warning("No chunks produced — nothing to index.")
-            return 0
-
-        # Create a debug snapshot of the chunks if enabled in config
-        if self.config.ingestion.save_snapshots:
-            self.save_chunks_before_embedding(chunks=chunks, output_prefix=f"ingest_{doc_id_prefix}")
-
-        # ── 3. Batch Embed ────────────────────────────────────────────────────
-        texts = [c.text for c in chunks]
-        batch_size = self.config.embedding.batch_size
-
-        logger.info(f"Embedding {len(texts)} chunks (batch_size={batch_size}) ...")
-
-        all_dense = []
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i : i + batch_size]
-            all_dense.extend(self.dense_model.embed_documents(batch))
-
-        all_sparse = []
-        for i in range(0, len(texts), batch_size):
-            batch = texts[i : i + batch_size]
-            all_sparse.extend(self.sparse_model.embed_documents(batch))
-
-        # ── 4. Build records & Insert ─────────────────────────────────────────
-        data = []
-        processed_sources = set()
-        for chunk, dense_emb, sparse_emb in zip(chunks, all_dense, all_sparse):
-            record = {
-                "doc_id": chunk.doc_id,
-                "text": chunk.text,
-                "chunk_index": chunk.chunk_index,
-                "dense_embedding": dense_emb,
-                "sparse_embedding": sparse_emb,
-                "pdf_url": chunk.metadata.get("pdf_url"),
-                "page_url": chunk.metadata.get("page_url"),
-                "scraped_at": chunk.metadata.get("scraped_at"),
-                "page_number": chunk.page_number,
-            }
-            record.update(chunk.metadata)
-            data.append(record)
-            # Use doc_id or URL as tracking key instead of filename
-            processed_sources.add(chunk.doc_id)
-
-        self.storage.insert(collection_name, data)
-        
-        # ── 5. Update State ──────────────────────────────────────────────────
-        # Update ingestion state for all successfully processed files
-        # We group chunks by filename to count them
-        source_counts = {}
-        for chunk in chunks:
-            source_counts[chunk.filename] = source_counts.get(chunk.filename, 0) + 1
-        
-        for source_path, count in source_counts.items():
-            self.ingestion_state.update_file(
-                file_path=source_path,
-                doc_id=os.path.basename(source_path), # Use filename as id in state
-                chunk_count=count
-            )
-
-        # ── 6. Memory Cleanup ────────────────────────────────────────────────
+        logger.info(
+            "Ingestion summary: "
+            f"indexed_chunks={summary.indexed_chunks}, "
+            f"successful_files={summary.successful_files}, "
+            f"failed_files={summary.failed_files}, "
+            f"skipped_files={summary.skipped_files}"
+        )
+        if summary.failures:
+            logger.warning(f"Ingestion failures: {summary.failures}")
         logger.info("Ingestion complete. Keeping embedding models loaded.")
+        return summary.indexed_chunks
 
-        logger.info(f"Indexed {len(data)} chunks from {len(processed_sources)} files.")
-        return len(data)
+    def _embed_chunks_with_retry(self, chunks: List[Any], batch_size: int) -> List[Dict[str, Any]]:
+        records = []
+        for start in range(0, len(chunks), batch_size):
+            chunk_batch = chunks[start : start + batch_size]
+            texts = [chunk.text for chunk in chunk_batch]
+            dense_embeddings = self._embed_batch_with_retry(
+                self.dense_model.embed_documents,
+                texts,
+                batch_size=len(texts),
+                label="dense",
+            )
+            sparse_embeddings = self._embed_batch_with_retry(
+                self.sparse_model.embed_documents,
+                texts,
+                batch_size=len(texts),
+                label="sparse",
+            )
+            if len(dense_embeddings) != len(chunk_batch) or len(sparse_embeddings) != len(chunk_batch):
+                raise ValueError(
+                    "Embedding count mismatch: "
+                    f"chunks={len(chunk_batch)}, dense={len(dense_embeddings)}, "
+                    f"sparse={len(sparse_embeddings)}"
+                )
+            for chunk, dense_emb, sparse_emb in zip(chunk_batch, dense_embeddings, sparse_embeddings):
+                records.append(self._build_storage_record(chunk, dense_emb, sparse_emb))
+        return records
+
+    def _embed_batch_with_retry(self, embed_fn, texts: List[str], batch_size: int, label: str) -> List[Any]:
+        try:
+            embeddings = []
+            for start in range(0, len(texts), batch_size):
+                embeddings.extend(embed_fn(texts[start : start + batch_size]))
+            return embeddings
+        except Exception as e:
+            self._clear_cuda_cache()
+            if batch_size <= 1:
+                raise
+            smaller_batch = max(1, batch_size // 2)
+            logger.warning(
+                f"{label} embedding failed for {len(texts)} text(s) at "
+                f"batch_size={batch_size}: {e}. Retrying with batch_size={smaller_batch}."
+            )
+            return self._embed_batch_with_retry(embed_fn, texts, smaller_batch, label)
+
+    def _build_storage_record(self, chunk: Any, dense_emb: Any, sparse_emb: Any) -> Dict[str, Any]:
+        source_path = os.path.abspath(chunk.filename)
+        record = {
+            "doc_id": chunk.doc_id,
+            "text": chunk.text,
+            "chunk_index": chunk.chunk_index,
+            "dense_embedding": dense_emb,
+            "sparse_embedding": sparse_emb,
+            "pdf_url": chunk.metadata.get("pdf_url"),
+            "page_url": chunk.metadata.get("page_url"),
+            "scraped_at": chunk.metadata.get("scraped_at"),
+            "page_number": chunk.page_number,
+        }
+        record.update(chunk.metadata)
+        record["source"] = source_path
+        record["filename"] = chunk.filename
+        return record
+
+    @staticmethod
+    def _clear_cuda_cache() -> None:
+        try:
+            import torch
+
+            if torch.cuda.is_available():
+                torch.cuda.empty_cache()
+        except Exception:
+            logger.debug("Unable to clear CUDA cache", exc_info=True)
 
     def save_chunks_before_embedding(
         self,
@@ -283,7 +350,7 @@ class RAGPipeline:
         """
         Run the full RAG pipeline:
           1. Embed query (dense + sparse)
-          2. Milvus hybrid search → RRF fusion (top-k candidates)
+          2. Milvus hybrid search -> RRF fusion (top-k candidates)
           3. Jina-v3 reranking
           4. Slice to rerank_top_k for LLM context window
           5. Calculate confidence score
@@ -300,7 +367,7 @@ class RAGPipeline:
                 k=k or self.config.retrieval.k,
             )
         # Slice to rerank_top_k to avoid LLM token overflow.
-        # After reranking, docs are sorted best-first — we take only the top N.
+        # After reranking, docs are sorted best-first; we take only the top N.
         rerank_top_k = self.config.retrieval.rerank_top_k
         docs = docs[:rerank_top_k]
         logger.info(

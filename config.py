@@ -6,9 +6,9 @@ from typing import List, Optional
 class IngestionConfig:
     chunk_size: int = 512
     chunk_overlap: int = 50
-    chunking_strategy: str = "fixed"
+    chunking_strategy: str = "hierarchical"
     pdf_parser: str = "docling"
-    html_parser: str = "trafilatura"
+    html_parser: str = "docling"
     save_snapshots: bool = False
     incremental: bool = True
     state_path: str = "storage/ingestion_state.json"

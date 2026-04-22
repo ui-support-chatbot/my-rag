@@ -303,8 +303,8 @@ curl -X POST http://localhost:8000/ingest \
 ```bash
 docker compose logs -f rag-api
 # You'll see lines like:
-# INFO  - Embedding 847 chunks (batch_size=32) ...
-# INFO  - Indexed 847 chunks into 'documents'
+# INFO  - Starting ingestion: 42 file(s), batch_size=1, skipped=0
+# INFO  - Ingestion summary: indexed_chunks=847, successful_files=42, failed_files=0, skipped_files=0
 # INFO  - Background ingestion completed for: /app/data
 ```
 
