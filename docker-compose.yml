@@ -93,14 +93,14 @@ services:
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
 
     # ── GPU Configuration ──────────────────────────────────────────────────
-    # Expose both GPUs to the API container.
-    # Dense runs on cuda:1 and sparse runs on cuda:0 in config_server.yaml.
+    # GPU 0: Dense (Harrier) embedding model
+    # Sparse encoder runs on CPU to keep VRAM headroom on the embedding GPU.
     deploy:
       resources:
         reservations:
           devices:
             - driver: nvidia
-              device_ids: [ '0', '1' ]
+              device_ids: [ '0' ]
               capabilities: [ gpu ]
 
     # ── Docker 20.10 Security Workarounds ─────────────────────────────────

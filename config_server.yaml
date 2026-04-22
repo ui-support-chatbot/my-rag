@@ -13,8 +13,8 @@ embedding:
   dense_model: "microsoft/harrier-oss-v1-0.6b"
   sparse_model: "opensearch-project/opensearch-neural-sparse-encoding-doc-v3-gte"
   device: "cuda"
-  dense_device: "cuda:1"
-  sparse_device: "cuda:0"
+  dense_device: "cuda:0"
+  sparse_device: "cpu"
   batch_size: 1
   quantize_8bit: true
 
