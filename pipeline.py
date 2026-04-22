@@ -3,6 +3,8 @@ from typing import List, Dict, Any, Optional
 import logging
 import json
 import os
+import uuid
+from datetime import datetime
 from pathlib import Path
 
 from config import (
@@ -43,6 +45,7 @@ class IngestionRunSummary:
     successful_files: int = 0
     failed_files: int = 0
     skipped_files: int = 0
+    duplicate_files: int = 0
     failures: List[Dict[str, str]] = field(default_factory=list)
 
 
@@ -131,6 +134,270 @@ class RAGPipeline:
         doc_id_prefix: str,
         collection_name: str,
     ) -> int:
+        all_file_paths = self._discover_ingestion_files(paths, directory)
+
+        summary = IngestionRunSummary()
+        run_id = uuid.uuid4().hex
+        started_at = datetime.now()
+        job_snapshot = self._new_ingestion_snapshot(
+            run_id=run_id,
+            started_at=started_at,
+            input_paths=paths,
+            directory=directory,
+            discovered_files=all_file_paths,
+        )
+        files_to_process = []
+        pending_job_duplicates = []
+        seen_hashes: Dict[str, Dict[str, Any]] = {}
+
+        if self.config.ingestion.incremental:
+            for path in all_file_paths:
+                fingerprint = self.ingestion_state.scan_file(path)
+                classification = self.ingestion_state.classify_fingerprint(fingerprint)
+                status = classification["status"]
+                canonical = classification.get("canonical")
+                if fingerprint.hash in seen_hashes and status in {"new", "modified"}:
+                    status = "duplicate"
+                    classification["status"] = status
+                    classification["reason"] = "same content as another file in this job"
+                    classification["canonical_job_entry"] = seen_hashes[fingerprint.hash]
+                else:
+                    seen_hashes.setdefault(
+                        fingerprint.hash,
+                        {
+                            "path": fingerprint.path,
+                            "doc_id": canonical.doc_id if canonical else self._doc_id_for_fingerprint(fingerprint.hash, doc_id_prefix),
+                        },
+                    )
+
+                if status == "unchanged":
+                    logger.info(f"Skipping {path}: No changes detected (incremental)")
+                    summary.skipped_files += 1
+                    job_snapshot["files"].append(
+                        self._snapshot_manifest_entry(
+                            path=path,
+                            fingerprint=fingerprint,
+                            status=status,
+                            reason=classification["reason"],
+                            doc_id=classification["canonical"].doc_id,
+                            chunk_count=classification["canonical"].chunk_count,
+                        )
+                    )
+                elif status == "duplicate":
+                    summary.duplicate_files += 1
+                    if classification.get("canonical"):
+                        canonical_doc = self._record_duplicate_alias(
+                            collection_name=collection_name,
+                            path=path,
+                            fingerprint=fingerprint,
+                            classification=classification,
+                        )
+                        job_snapshot["files"].append(
+                            self._snapshot_manifest_entry(
+                                path=path,
+                                fingerprint=fingerprint,
+                                status=status,
+                                reason=classification["reason"],
+                                doc_id=canonical_doc["doc_id"],
+                                chunk_count=0,
+                                canonical_path=canonical_doc["path"],
+                                canonical_doc_id=canonical_doc["doc_id"],
+                            )
+                        )
+                    else:
+                        pending_job_duplicates.append((path, fingerprint, classification))
+                else:
+                    files_to_process.append((path, status, fingerprint))
+        else:
+            for path in all_file_paths:
+                fingerprint = self.ingestion_state.scan_file(path)
+                classification = self.ingestion_state.classify_fingerprint(fingerprint)
+                status = classification["status"]
+                canonical = classification.get("canonical")
+                if fingerprint.hash in seen_hashes and status in {"new", "modified", "unchanged"}:
+                    status = "duplicate"
+                    classification["status"] = status
+                    classification["reason"] = "same content as another file in this job"
+                    classification["canonical_job_entry"] = seen_hashes[fingerprint.hash]
+                else:
+                    seen_hashes.setdefault(
+                        fingerprint.hash,
+                        {
+                            "path": fingerprint.path,
+                            "doc_id": canonical.doc_id if canonical else self._doc_id_for_fingerprint(fingerprint.hash, doc_id_prefix),
+                        },
+                    )
+
+                if status == "duplicate":
+                    summary.duplicate_files += 1
+                    if classification.get("canonical"):
+                        canonical_doc = self._record_duplicate_alias(
+                            collection_name=collection_name,
+                            path=path,
+                            fingerprint=fingerprint,
+                            classification=classification,
+                        )
+                        job_snapshot["files"].append(
+                            self._snapshot_manifest_entry(
+                                path=path,
+                                fingerprint=fingerprint,
+                                status=status,
+                                reason=classification["reason"],
+                                doc_id=canonical_doc["doc_id"],
+                                chunk_count=0,
+                                canonical_path=canonical_doc["path"],
+                                canonical_doc_id=canonical_doc["doc_id"],
+                            )
+                        )
+                    else:
+                        pending_job_duplicates.append((path, fingerprint, classification))
+                else:
+                    files_to_process.append((path, "modified" if status == "unchanged" else status, fingerprint))
+
+        if not files_to_process:
+            logger.info("Nothing to ingest. Everything is up to date.")
+            self._finalize_ingestion_snapshot(job_snapshot, summary, started_at)
+            return 0
+
+        batch_size = max(1, self.config.embedding.batch_size)
+        total_files = len(files_to_process)
+        logger.info(
+            f"Starting ingestion: {total_files} file(s), "
+            f"batch_size={batch_size}, skipped={summary.skipped_files}, "
+            f"duplicates={summary.duplicate_files}"
+        )
+
+        for index, (path, status, fingerprint) in enumerate(files_to_process):
+            doc_id = self._doc_id_for_fingerprint(fingerprint.hash, doc_id_prefix)
+            try:
+                logger.info(f"[{index + 1}/{total_files}] Processing {path} ({status})")
+                file_chunks = self.ingestion.process_file(path, doc_id=doc_id)
+                if not file_chunks:
+                    raise ValueError("No chunks produced")
+
+                records = self._embed_chunks_with_retry(file_chunks, batch_size)
+
+                # Delete old or partial rows only after replacement vectors are ready.
+                self.storage.delete_by_source(collection_name, path)
+                self.storage.insert(collection_name, records)
+                self.ingestion_state.update_file(
+                    file_path=path,
+                    doc_id=doc_id,
+                    chunk_count=len(records),
+                    fingerprint=fingerprint,
+                    metadata={"status": "canonical"},
+                )
+
+                summary.indexed_chunks += len(records)
+                summary.successful_files += 1
+                job_snapshot["files"].append(
+                    self._snapshot_manifest_entry(
+                        path=path,
+                        fingerprint=fingerprint,
+                        status=status,
+                        reason="processed and embedded",
+                        doc_id=doc_id,
+                        chunk_count=len(records),
+                        chunks=file_chunks,
+                    )
+                )
+                pending_job_duplicates = self._finalize_pending_job_duplicates(
+                    pending_job_duplicates=pending_job_duplicates,
+                    content_hash=fingerprint.hash,
+                    canonical_doc={"path": fingerprint.path, "doc_id": doc_id},
+                    collection_name=collection_name,
+                    job_snapshot=job_snapshot,
+                )
+                logger.info(f"Indexed {len(records)} chunk(s) from {path}")
+            except Exception as e:
+                summary.failed_files += 1
+                summary.failures.append({"path": path, "error": str(e)})
+                job_snapshot["files"].append(
+                    self._snapshot_manifest_entry(
+                        path=path,
+                        fingerprint=fingerprint,
+                        status="failed",
+                        reason=str(e),
+                        doc_id=doc_id,
+                        chunk_count=0,
+                    )
+                )
+                logger.error(f"Failed to ingest {path}: {e}", exc_info=True)
+                self._clear_cuda_cache()
+
+        for path, fingerprint, classification in pending_job_duplicates:
+            summary.failed_files += 1
+            summary.failures.append(
+                {
+                    "path": path,
+                    "error": "Duplicate canonical file was not successfully indexed",
+                }
+            )
+            job_snapshot["files"].append(
+                self._snapshot_manifest_entry(
+                    path=path,
+                    fingerprint=fingerprint,
+                    status="failed",
+                    reason="duplicate canonical file was not successfully indexed",
+                    doc_id=classification.get("canonical_job_entry", {}).get("doc_id", ""),
+                    chunk_count=0,
+                    canonical_path=classification.get("canonical_job_entry", {}).get("path"),
+                    canonical_doc_id=classification.get("canonical_job_entry", {}).get("doc_id"),
+                )
+            )
+
+        logger.info(
+            "Ingestion summary: "
+            f"indexed_chunks={summary.indexed_chunks}, "
+            f"successful_files={summary.successful_files}, "
+            f"failed_files={summary.failed_files}, "
+            f"skipped_files={summary.skipped_files}, "
+            f"duplicate_files={summary.duplicate_files}"
+        )
+        if summary.failures:
+            logger.warning(f"Ingestion failures: {summary.failures}")
+        self._finalize_ingestion_snapshot(job_snapshot, summary, started_at)
+        logger.info("Ingestion complete. Keeping embedding models loaded.")
+        return summary.indexed_chunks
+
+    def _finalize_pending_job_duplicates(
+        self,
+        pending_job_duplicates: List[Any],
+        content_hash: str,
+        canonical_doc: Dict[str, str],
+        collection_name: str,
+        job_snapshot: Dict[str, Any],
+    ) -> List[Any]:
+        remaining = []
+        for path, fingerprint, classification in pending_job_duplicates:
+            if fingerprint.hash != content_hash:
+                remaining.append((path, fingerprint, classification))
+                continue
+
+            canonical_doc_for_alias = self._record_duplicate_alias(
+                collection_name=collection_name,
+                path=path,
+                fingerprint=fingerprint,
+                classification={
+                    **classification,
+                    "canonical_job_entry": canonical_doc,
+                },
+            )
+            job_snapshot["files"].append(
+                self._snapshot_manifest_entry(
+                    path=path,
+                    fingerprint=fingerprint,
+                    status="duplicate",
+                    reason=classification.get("reason", "same content as another file in this job"),
+                    doc_id=canonical_doc_for_alias["doc_id"],
+                    chunk_count=0,
+                    canonical_path=canonical_doc_for_alias["path"],
+                    canonical_doc_id=canonical_doc_for_alias["doc_id"],
+                )
+            )
+        return remaining
+
+    def _discover_ingestion_files(self, paths: List[str], directory: str) -> List[str]:
         all_file_paths = []
         if paths:
             all_file_paths.extend(paths)
@@ -142,76 +409,155 @@ class RAGPipeline:
                     for file in files:
                         if any(file.lower().endswith(ext) for ext in [".pdf", ".html", ".htm"]):
                             all_file_paths.append(os.path.join(root, file))
+        return sorted(dict.fromkeys(all_file_paths))
 
-        summary = IngestionRunSummary()
-        files_to_process = []
-        if self.config.ingestion.incremental:
-            for path in all_file_paths:
-                status = self.ingestion_state.get_file_status(path)
-                if status == "unchanged":
-                    logger.info(f"Skipping {path}: No changes detected (Incremental)")
-                    summary.skipped_files += 1
-                else:
-                    files_to_process.append((path, status))
+    def _doc_id_for_fingerprint(self, content_hash: str, doc_id_prefix: str) -> str:
+        prefix = doc_id_prefix or "doc"
+        return f"{prefix}_{content_hash[:12]}"
+
+    def _record_duplicate_alias(
+        self,
+        collection_name: str,
+        path: str,
+        fingerprint: Any,
+        classification: Dict[str, Any],
+    ) -> Dict[str, str]:
+        canonical = classification.get("canonical")
+        canonical_job_entry = classification.get("canonical_job_entry")
+        if canonical:
+            canonical_doc = {"path": canonical.path, "doc_id": canonical.doc_id}
+        elif canonical_job_entry:
+            canonical_doc = {
+                "path": canonical_job_entry["path"],
+                "doc_id": canonical_job_entry["doc_id"],
+            }
         else:
-            files_to_process = [(path, "new") for path in all_file_paths]
+            raise ValueError(f"Duplicate classification for {path} has no canonical file")
 
-        if not files_to_process:
-            logger.info("Nothing to ingest. Everything is up to date.")
-            return 0
+        existing = classification.get("existing")
+        if existing and existing.path == fingerprint.path and existing.doc_id != canonical_doc["doc_id"]:
+            self.storage.delete_by_source(collection_name, path)
 
-        batch_size = max(1, self.config.embedding.batch_size)
-        total_files = len(files_to_process)
-        logger.info(
-            f"Starting ingestion: {total_files} file(s), "
-            f"batch_size={batch_size}, skipped={summary.skipped_files}"
+        from ingestion.state import FileState
+
+        canonical_state = canonical or FileState(
+            path=canonical_doc["path"],
+            hash=fingerprint.hash,
+            last_modified=fingerprint.last_modified,
+            doc_id=canonical_doc["doc_id"],
         )
-
-        for index, (path, status) in enumerate(files_to_process):
-            doc_id = f"{doc_id_prefix}_{index:03d}"
-            try:
-                logger.info(f"[{index + 1}/{total_files}] Processing {path} ({status})")
-                file_chunks = self.ingestion.process_file(path, doc_id=doc_id)
-                if not file_chunks:
-                    raise ValueError("No chunks produced")
-
-                if self.config.ingestion.save_snapshots:
-                    self.save_chunks_before_embedding(
-                        chunks=file_chunks,
-                        output_prefix=f"ingest_{Path(path).stem}",
-                    )
-
-                records = self._embed_chunks_with_retry(file_chunks, batch_size)
-
-                # Delete old or partial rows only after replacement vectors are ready.
-                self.storage.delete_by_source(collection_name, path)
-                self.storage.insert(collection_name, records)
-                self.ingestion_state.update_file(
-                    file_path=path,
-                    doc_id=doc_id,
-                    chunk_count=len(records),
-                )
-
-                summary.indexed_chunks += len(records)
-                summary.successful_files += 1
-                logger.info(f"Indexed {len(records)} chunk(s) from {path}")
-            except Exception as e:
-                summary.failed_files += 1
-                summary.failures.append({"path": path, "error": str(e)})
-                logger.error(f"Failed to ingest {path}: {e}", exc_info=True)
-                self._clear_cuda_cache()
-
-        logger.info(
-            "Ingestion summary: "
-            f"indexed_chunks={summary.indexed_chunks}, "
-            f"successful_files={summary.successful_files}, "
-            f"failed_files={summary.failed_files}, "
-            f"skipped_files={summary.skipped_files}"
+        self.ingestion_state.record_alias(
+            file_path=path,
+            canonical=canonical_state,
+            fingerprint=fingerprint,
+            metadata={"reason": classification.get("reason", "duplicate content")},
         )
-        if summary.failures:
-            logger.warning(f"Ingestion failures: {summary.failures}")
-        logger.info("Ingestion complete. Keeping embedding models loaded.")
-        return summary.indexed_chunks
+        logger.info(
+            f"Skipping duplicate {fingerprint.path}; canonical={canonical_doc['path']}"
+        )
+        return canonical_doc
+
+    def _new_ingestion_snapshot(
+        self,
+        run_id: str,
+        started_at: datetime,
+        input_paths: List[str],
+        directory: str,
+        discovered_files: List[str],
+    ) -> Dict[str, Any]:
+        return {
+            "run_id": run_id,
+            "started_at": started_at.isoformat(),
+            "finished_at": None,
+            "inputs": {
+                "paths": input_paths or [],
+                "directory": directory,
+            },
+            "config": {
+                "incremental": self.config.ingestion.incremental,
+                "chunking_strategy": self.config.ingestion.chunking_strategy,
+                "dense_model": self.config.embedding.dense_model,
+                "sparse_model": self.config.embedding.sparse_model,
+                "collection_name": self.config.storage.collection_name,
+            },
+            "discovered_file_count": len(discovered_files),
+            "files": [],
+            "totals": {},
+        }
+
+    def _snapshot_manifest_entry(
+        self,
+        path: str,
+        fingerprint: Any,
+        status: str,
+        reason: str,
+        doc_id: str,
+        chunk_count: int,
+        canonical_path: str = None,
+        canonical_doc_id: str = None,
+        chunks: List[Any] = None,
+    ) -> Dict[str, Any]:
+        entry = {
+            "path": os.path.abspath(path),
+            "status": status,
+            "reason": reason,
+            "content_hash": fingerprint.hash,
+            "size": fingerprint.size,
+            "last_modified": fingerprint.last_modified,
+            "doc_id": doc_id,
+            "chunk_count": chunk_count,
+        }
+        if canonical_path:
+            entry["canonical_path"] = canonical_path
+        if canonical_doc_id:
+            entry["canonical_doc_id"] = canonical_doc_id
+        if chunks is not None:
+            entry["chunks"] = [
+                {
+                    "chunk_index": c.chunk_index,
+                    "doc_id": c.doc_id,
+                    "text": c.text,
+                    "breadcrumb": c.breadcrumb,
+                    "page_number": c.page_number,
+                    "token_estimate": len(c.text) // 4,
+                    "metadata": dict(c.metadata) if c.metadata else {},
+                }
+                for c in chunks
+            ]
+        return entry
+
+    def _finalize_ingestion_snapshot(
+        self,
+        snapshot: Dict[str, Any],
+        summary: IngestionRunSummary,
+        started_at: datetime,
+    ) -> None:
+        snapshot["finished_at"] = datetime.now().isoformat()
+        snapshot["duration_seconds"] = (
+            datetime.fromisoformat(snapshot["finished_at"]) - started_at
+        ).total_seconds()
+        snapshot["totals"] = {
+            "indexed_chunks": summary.indexed_chunks,
+            "successful_files": summary.successful_files,
+            "failed_files": summary.failed_files,
+            "skipped_files": summary.skipped_files,
+            "duplicate_files": summary.duplicate_files,
+            "manifest_entries": len(snapshot["files"]),
+        }
+        snapshot["failures"] = summary.failures
+
+        if not self.config.ingestion.save_snapshots:
+            return
+
+        timestamp = started_at.strftime("%Y%m%d_%H%M%S")
+        snapshot_dir = Path("storage/snapshots")
+        snapshot_dir.mkdir(parents=True, exist_ok=True)
+        filepath = snapshot_dir / f"ingest_job_{timestamp}.json"
+
+        with open(filepath, "w", encoding="utf-8") as f:
+            json.dump(snapshot, f, indent=2, ensure_ascii=False, default=str)
+
+        logger.info(f"Ingestion job snapshot saved to {filepath}")
 
     def _embed_chunks_with_retry(self, chunks: List[Any], batch_size: int) -> List[Dict[str, Any]]:
         records = []

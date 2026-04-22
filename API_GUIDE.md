@@ -35,6 +35,7 @@ http://152.118.31.54:8000/docs
 - `query` endpoints accept optional `metadata_filter`.
 - The streaming endpoint returns Server-Sent Events.
 - Ingestion runs in the background, so the response comes back before processing finishes.
+- Normal ingestion writes one job-level chunk snapshot when `save_snapshots` is enabled.
 
 ## Health And Storage
 
@@ -142,6 +143,52 @@ Example response:
   "status": "ingestion_started",
   "directory": "/app/data",
   "message": "Check container logs for progress."
+}
+```
+
+Ingestion is incremental and content-aware:
+
+- New or modified files are parsed, chunked, embedded, and inserted into Milvus.
+- Unchanged files are skipped without parsing, chunking, or embedding.
+- Files with duplicate byte-for-byte content are skipped even when the filename or path is different.
+- Duplicate files are recorded as aliases of the canonical document in `storage/ingestion_state.json`.
+
+When `save_snapshots: true`, each `/ingest` call writes one snapshot file:
+
+```text
+storage/snapshots/ingest_job_<timestamp>.json
+```
+
+The snapshot is a debug artifact, not the retrieval source of truth. Milvus remains the source used by `/query` and debug retrieval endpoints.
+
+Snapshot entries for processed files include the actual chunk text:
+
+```json
+{
+  "status": "new",
+  "path": "/app/data/example.pdf",
+  "doc_id": "doc_ab12cd34ef56",
+  "chunk_count": 3,
+  "chunks": [
+    {
+      "chunk_index": 0,
+      "text": "Actual chunk text...",
+      "page_number": 1,
+      "metadata": {}
+    }
+  ]
+}
+```
+
+Snapshot entries for unchanged or duplicate files are manifest-only for efficiency. They show the reason and, for duplicates, the canonical document:
+
+```json
+{
+  "status": "duplicate",
+  "path": "/app/data/renamed-example.pdf",
+  "canonical_path": "/app/data/example.pdf",
+  "canonical_doc_id": "doc_ab12cd34ef56",
+  "reason": "same content as canonical file"
 }
 ```
 

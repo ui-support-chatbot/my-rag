@@ -22,7 +22,7 @@ To ensure high-quality text extraction and structural preservation, we use a sop
   - This focuses strictly on the document's organizational hierarchy (headers, sections, lists) to produce segments that map human-logical boundaries.
   - Each chunk is **contextualized** (prepended with its heading hierarchy), providing critical context for retrieval.
   - `ChunkRecord`s include a **breadcrumb** (e.g., `"Introduction > Methods > Data Collection"`) and exact **page numbers**.
-  - **Intermediate Snapshots**: For debugging, the system can save individual chunks as JSON files to `storage/snapshots` before they are embedded. This is controlled by `ingestion.save_snapshots` in the config.
+  - **Job-Level Snapshots**: For debugging, normal ingestion can save one JSON snapshot per ingestion job to `storage/snapshots/ingest_job_<timestamp>.json`. This is controlled by `ingestion.save_snapshots` in the config. Processed files include their actual chunk text in the snapshot; unchanged and duplicate files are represented as manifest entries for efficiency.
   - **Network Configuration**: To bypass host firewall (UFW) blockers that often drop packets from the Docker bridge to the host IP, we use `network_mode: host`. This removes Docker-network isolation for this container and allows it to talk to `localhost:11434` (Ollama) and `localhost:19530` (Milvus) with zero firewall interference.
 
 ### B. Embedding & Vector Storage
@@ -74,15 +74,18 @@ For late-stage precision, we use a **Listwise Cross-Encoder Reranker**:
   - The system returns an explicit list of sources (breadcrumb, filename, page) used in the answer.
   - `<think>...</think>` tags from reasoning models (e.g., Qwen, DeepSeek) are automatically stripped.
 
-### F. Incremental Ingestion & State Management
+### F. Incremental Ingestion, Deduplication & State Management
 
 To avoid redundant processing and ensure index integrity, the system implements **Incremental Ingestion**:
 
-- **Content Change Detection**: Every file is hashed using **MD5**. The system compares the current file hash against a local registry before processing.
-- **State Registry**: A JSON file (`storage/ingestion_state.json`) tracks every ingested file, its hash, and the number of chunks generated.
-- **Deduplication**: 
-    - **UNCHANGED**: If hashes match, the file is skipped entirely.
-    - **MODIFIED**: If a hash changes, the system performs a `delete_by_source` operation in Milvus to remove stale chunks before re-indexing the new content.
+- **Content Change Detection**: Every candidate file is fingerprinted using **SHA-256** before parsing. Older MD5 state entries are still tolerated during state loading so existing deployments can transition without manually deleting `storage/ingestion_state.json`.
+- **State Registry**: A JSON file (`storage/ingestion_state.json`) tracks each known file path, content hash, document ID, chunk count, and metadata.
+- **Stable Document IDs**: New canonical documents use a stable hash-derived ID such as `doc_<hash12>`, so the same content keeps the same identity across ingestion runs.
+- **Deduplication**:
+    - **UNCHANGED**: If the same path has the same content hash, the file is skipped without parsing, chunking, embedding, or Milvus writes.
+    - **MODIFIED**: If the same path has changed content, the system embeds the replacement chunks, then performs `delete_by_source` in Milvus before inserting the new records.
+    - **DUPLICATE**: If a different path has byte-for-byte identical content to an existing canonical file, the file is skipped and recorded as an alias of the canonical document. This avoids duplicate vectors even when filenames change.
+- **Job Snapshot Manifest**: When `save_snapshots` is enabled, each ingestion call writes one snapshot containing run metadata, per-file status, totals, and chunks for newly processed files only. Skipped unchanged and duplicate files do not include fresh chunks because they are not rechunked.
 - **File Uploads**: A dedicated directory (`/app/uploads`) is mounted to the container to handle documents uploaded via the API, which are then queued for immediate ingestion.
 
 ### G. Streaming Generation
@@ -114,7 +117,7 @@ For a responsive user experience, the system supports real-time token streaming:
 ## 4. Pipeline Data Flow
 
 ### Ingestion Flow
-`Raw Files` -> `Docling Parsing` -> `Hierarchical Chunking` -> `Per-file Dense & Sparse Embedding` -> `Milvus Storage (with Breadcrumbs & Page Nos)`
+`Raw Files` -> `SHA-256 Fingerprint Scan` -> `Incremental/Duplicate Classification` -> `Docling Parsing for New/Modified Canonical Files` -> `Hierarchical Chunking` -> `Dense & Sparse Embedding` -> `Milvus Storage` -> `Job Snapshot Manifest`
 
 ### Query Flow
 `User Query` -> `Dual Embedding` -> `Milvus Hybrid Search` -> `Metadata Filtering (Optional)` -> `RRF (k=60)` -> `Top-50 Candidates` -> `Jina Reranking` -> `Top-5 Context` -> `Grounded Generation` -> `Answer + Sources`
@@ -187,7 +190,8 @@ Triggers a background ingestion process for a directory.
   {"directory_path": "/app/data"}
   ```
 - **Response**: `{"status": "ingestion_started", "directory": "/app/data"}`
-- **Incremental Logic**: If `ingestion.incremental` is true, it only processes new/modified files.
+- **Incremental Logic**: If `ingestion.incremental` is true, it only processes new/modified canonical files. Unchanged files are skipped, and duplicate-content files are recorded as aliases without embedding duplicate vectors.
+- **Snapshots**: If `ingestion.save_snapshots` is true, the run writes one `storage/snapshots/ingest_job_<timestamp>.json` file. Processed entries include actual chunk text; unchanged and duplicate entries are manifest-only.
 
 ### `POST /ingestion/upload`
 Uploads a single file (PDF/HTML) and triggers ingestion.
@@ -196,7 +200,7 @@ Uploads a single file (PDF/HTML) and triggers ingestion.
 
 ### `GET /ingestion/status`
 Returns a dashboard of all currently ingested files.
-- **Response**: List of file paths, MD5 hashes, and chunk counts.
+- **Response**: List of file paths, content hashes, document IDs, chunk counts, and alias metadata for duplicate files.
 
 
 ### Interactive Docs
