@@ -74,7 +74,8 @@ class DenseEmbeddingModel(BaseEmbeddingModel):
 
     def embed_documents(self, texts: List[str]) -> List[List[float]]:
         """Encode documents — no instruction prompt needed."""
-        embeddings = self.model.encode(texts, convert_to_numpy=True, batch_size=32)
+        # Keep the internal encode batch smaller to reduce peak VRAM during ingestion.
+        embeddings = self.model.encode(texts, convert_to_numpy=True, batch_size=8)
         if len(embeddings.shape) == 1:
             embeddings = embeddings.reshape(1, -1)
         return embeddings.tolist()
