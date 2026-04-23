@@ -251,39 +251,23 @@ async def query_rag(request: QueryRequest, response: Response):
 @app.post("/query/stream", summary="Run a RAG query with token streaming")
 async def query_rag_stream(request: QueryRequest):
     """
-    Streaming version of the RAG query. 
-    Returns an SSE stream of JSON objects (type: 'metadata', 'sources', or 'token').
+    Streaming version of the RAG query.
+    Returns an SSE stream of JSON objects (type: 'metadata', 'sources', 'token', or 'confidence').
     """
     if not rag_pipeline:
         raise HTTPException(status_code=503, detail="RAG Pipeline not initialized")
 
     try:
-        # Pre-retrieval for headers
-        docs = rag_pipeline.retriever.retrieve(
-            query=request.query,
-            collection_name=rag_pipeline.config.storage.collection_name,
-            metadata_filter=request.metadata_filter,
-            k=rag_pipeline.config.retrieval.k,
-        )
-        rerank_top_k = rag_pipeline.config.retrieval.rerank_top_k
-        docs = docs[:rerank_top_k]
-
-        # Calculate confidence score BEFORE starting the stream
-        confidence_score = rag_pipeline.llm.get_confidence_score(request.query, docs)
-
         return StreamingResponse(
             rag_pipeline.query_stream(
-                request.query, 
+                request.query,
                 metadata_filter=request.metadata_filter,
-                pre_retrieved_docs=docs,
-                confidence_score=confidence_score
             ),
             media_type="text/event-stream",
             headers={
                 "X-Accel-Buffering": "no",
                 "Cache-Control": "no-cache",
                 "Connection": "keep-alive",
-                "X-Confidence-Rate": str(confidence_score),
             }
         )
     except Exception as e:

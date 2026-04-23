@@ -740,7 +740,7 @@ class RAGPipeline:
         confidence_score = (
             result.confidence_score
             if result.confidence_score is not None
-            else self.llm.get_confidence_score(query, docs)
+            else self.llm.get_confidence_score(query, result.answer)
         )
 
         return RAGResult(
@@ -759,7 +759,6 @@ class RAGPipeline:
         metadata_filter: Optional[Dict] = None,
         k: Optional[int] = None,
         pre_retrieved_docs: Optional[List[Any]] = None,
-        confidence_score: Optional[float] = None,
     ):
         """Streaming version of the RAG pipeline query."""
 
@@ -777,14 +776,8 @@ class RAGPipeline:
                 rerank_top_k = self.config.retrieval.rerank_top_k
                 docs = docs[:rerank_top_k]
 
-            # If confidence wasn't provided (e.g. called directly from pipeline, not API)
-            # calculate it now.
-            if confidence_score is None:
-                confidence_score = self.llm.get_confidence_score(query, docs)
-
-            # Yield search metadata (Confidence + Doc count)
+            # Yield search metadata before the streamed answer begins.
             metadata_payload = {
-                "confidence_score": confidence_score,
                 "num_docs": len(docs),
                 "query": query
             }
@@ -803,9 +796,18 @@ class RAGPipeline:
             ]
             yield f"data: {json.dumps({'type': 'sources', 'content': sources})}\n\n"
 
-            # Stream the LLM response
+            # Stream the LLM response and keep the text so we can score it after.
+            answer_chunks: List[str] = []
             for token in self.llm.generate_stream(prompt=query, retrieved_docs=docs):
+                answer_chunks.append(token)
                 yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
+
+            final_answer = "".join(answer_chunks)
+            if not final_answer.strip() or final_answer.lstrip().startswith("[Error:"):
+                confidence_score = 0.0
+            else:
+                confidence_score = self.llm.get_confidence_score(query, final_answer)
+            yield f"data: {json.dumps({'type': 'confidence', 'content': {'confidence_score': confidence_score, 'query': query}})}\n\n"
 
         except Exception as e:
             logger.error(f"Streaming query failed: {e}", exc_info=True)

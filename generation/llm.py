@@ -141,11 +141,6 @@ class LLM:
             raw_content = response.choices[0].message.content or ""
             clean_content = re.sub(r"<think>.*?</think>", "", raw_content, flags=re.DOTALL).strip()
             answer = clean_content
-            confidence_score = (
-                self.get_confidence_score(prompt, retrieved_docs)
-                if retrieved_docs
-                else None
-            )
 
             sources = []
             if retrieved_docs:
@@ -158,6 +153,8 @@ class LLM:
                     }
                     for doc in retrieved_docs
                 ]
+
+            confidence_score = self.get_confidence_score(prompt, answer)
 
             return GenerationResult(
                 answer=answer,
@@ -235,35 +232,24 @@ class LLM:
     def get_confidence_score(
         self,
         query: str,
-        retrieved_docs: List[Any],
+        answer: str,
     ) -> float:
-        """Rate how well the retrieved docs can answer the query (0 to 1)."""
+        """Rate how well the answer addresses the query (0 to 1)."""
         from generation.prompts import CONFIDENCE_CHECK_PROMPT
         import re
 
-        # Fast path if no docs
-        if not retrieved_docs:
+        if not answer or not answer.strip():
             return 0.0
 
-        formatted_context = "\n\n".join(
-            [f"[{i+1}] {doc.text}" for i, doc in enumerate(retrieved_docs)]
-        )
-
         prompt = CONFIDENCE_CHECK_PROMPT.format(
-            query=query, context=formatted_context
+            query=query,
+            answer=answer,
         )
 
         try:
-            # We split instructions into System and User roles for better format enforcement
-            system_instruction = "\n".join(CONFIDENCE_CHECK_PROMPT.split("\n")[:-3])
-            user_input = "\n".join(CONFIDENCE_CHECK_PROMPT.split("\n")[-3:]).format(
-                query=query, context=formatted_context
-            )
-
             request_kwargs = self._chat_request_kwargs(max_tokens=20)
             request_kwargs["messages"] = [
-                {"role": "system", "content": system_instruction},
-                {"role": "user", "content": user_input},
+                {"role": "system", "content": prompt},
             ]
             request_kwargs["temperature"] = 0.0
             response = self.client.chat.completions.create(**request_kwargs)
@@ -282,8 +268,8 @@ class LLM:
                 return max(0.0, min(1.0, score))
             
             logger.warning(f"Could not parse confidence score from: {raw_output}")
-            return 0.0  # Neutral fallback
+            return 0.5  # Neutral fallback
             
         except Exception as e:
             logger.error(f"Confidence check failed: {e}")
-            return 0.0
+            return 0.5

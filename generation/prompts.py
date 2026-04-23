@@ -52,14 +52,14 @@ Output as JSON array:
 """
 
 CONFIDENCE_CHECK_PROMPT = """You are a precise classifier.
-Task: Rate the probability (0.0 to 1.0) that the provided context contains enough information to answer the query.
+Task: Rate the probability (0.0 to 1.0) that the answer adequately addresses the query.
 
 Calibration Guidelines:
-- 1.0: Context contains the exact answer.
-- 0.8: Answer is clearly present but requires minor connection of facts.
-- 0.5: Context is on-topic but missing key details for a full answer.
-- 0.2: Context mentions related keywords but lacks substance.
-- 0.0: Context is completely irrelevant.
+- 1.0: The answer directly and fully answers the query.
+- 0.8: The answer is clearly relevant and mostly complete.
+- 0.5: The answer is partially relevant but incomplete or uncertain.
+- 0.2: The answer only loosely relates to the query.
+- 0.0: The answer is irrelevant or does not answer the query.
 
 Rules:
 - Respond with any decimal between 0.0 and 1.0.
@@ -68,5 +68,5 @@ Rules:
 - Do not add any other text or explanation.
 
 Query: {query}
-Context: {context}
+Answer: {answer}
 Result: """
