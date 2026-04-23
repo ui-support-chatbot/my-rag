@@ -8,6 +8,7 @@ ingestion:
   html_chunking_strategy: "standard"
   save_snapshots: true
   incremental: true
+  state_path: "storage/ingestion_state_rebuild_20260422_132325.json"
 
 embedding:
   dense_model: "microsoft/harrier-oss-v1-0.6b"
@@ -20,7 +21,7 @@ embedding:
 
 storage:
   milvus_uri: "http://127.0.0.1:19530"
-  collection_name: "documents"
+  collection_name: "documents_rebuild_20260422_132325"
   db_name: "default"
   metric_type: "COSINE"
 
