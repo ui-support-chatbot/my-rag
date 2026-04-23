@@ -35,12 +35,14 @@ class LLM:
         max_tokens: int = 512,
         temperature: float = 0.0,
         reasoning_effort: Optional[str] = None,
+        system_prompt: Optional[str] = None,
     ):
         self.endpoint = endpoint
         self.model_name = model_name
         self.max_tokens = max_tokens
         self.temperature = temperature
         self.reasoning_effort = reasoning_effort
+        self.system_prompt = system_prompt
         self._client = None
 
     @property
@@ -150,7 +152,8 @@ class LLM:
         else:
             formatted_context = context or "No context provided."
 
-        system_content = DEFAULT_SYSTEM_PROMPT.format(context=formatted_context)
+        system_template = self.system_prompt or DEFAULT_SYSTEM_PROMPT
+        system_content = system_template.format(context=formatted_context)
         if structured_response:
             system_content = (
                 system_content
@@ -248,7 +251,8 @@ class LLM:
         else:
             formatted_context = context or "No context provided."
 
-        system_content = DEFAULT_SYSTEM_PROMPT.format(context=formatted_context)
+        system_template = self.system_prompt or DEFAULT_SYSTEM_PROMPT
+        system_content = system_template.format(context=formatted_context)
 
         try:
             request_kwargs = self._chat_request_kwargs()

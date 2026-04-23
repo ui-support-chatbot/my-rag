@@ -20,7 +20,7 @@ from ingestion import IngestionPipeline, PDFParser, HTMLParser, Chunker
 from embedding import DenseEmbeddingModel, SparseEmbeddingModel
 from storage import MilvusClient
 from retrieval import Retriever
-from generation import LLM, DEFAULT_SYSTEM_PROMPT
+from generation import LLM
 from evaluation import RAGASEvaluator
 from evaluation.synthetic_qa import SyntheticQAGenerator
 from debugging import ChunkInspector, RetrievalTracer
@@ -101,6 +101,7 @@ class RAGPipeline:
             max_tokens=config.generation.max_tokens,
             temperature=config.generation.temperature,
             reasoning_effort=config.generation.reasoning_effort,
+            system_prompt=config.generation.system_prompt,
         )
         self.structured_response = config.generation.structured_response
         self.evaluator = None

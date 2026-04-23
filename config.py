@@ -1,6 +1,8 @@
 from dataclasses import dataclass, field
 from typing import List, Optional
 
+from generation.prompts import DEFAULT_SYSTEM_PROMPT
+
 
 @dataclass
 class IngestionConfig:
@@ -57,11 +59,7 @@ class GenerationConfig:
     temperature: float = 0.0
     reasoning_effort: Optional[str] = None
     structured_response: bool = False
-    system_prompt: str = (
-        "Use the following context to answer the question. "
-        "If the context does not contain enough information to answer, say so.\n\n"
-        "Context:\n{context}"
-    )
+    system_prompt: str = DEFAULT_SYSTEM_PROMPT
 
 
 @dataclass

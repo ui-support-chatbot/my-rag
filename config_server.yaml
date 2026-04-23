@@ -39,7 +39,7 @@ generation:
   max_tokens: 512
   temperature: 0.2
   reasoning_effort: "none"
-  structured_response: false
+  structured_response: true
 
 evaluation:
   metrics: ["faithfulness", "answer_relevancy", "context_precision", "context_recall"]
