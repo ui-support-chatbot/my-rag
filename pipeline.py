@@ -723,7 +723,7 @@ class RAGPipeline:
         rerank_top_k = self.config.retrieval.rerank_top_k
         retrieved_count = len(docs)
         docs = docs[:rerank_top_k]
-        stage_label = "reranked" if self.retriever.reranker else "RRF-ranked"
+        stage_label = "reranked" if self.retriever.reranker else "RRF-ranked (No dedicated reranker)"
         logger.info(
             f"Passing top-{len(docs)} {stage_label} docs to LLM "
             f"(from {retrieved_count} retrieved candidates)"
