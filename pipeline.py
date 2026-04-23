@@ -732,13 +732,11 @@ class RAGPipeline:
             f"(from {retrieved_count} retrieved candidates)"
         )
 
-        # Ask the generator for a structured JSON answer so confidence travels
-        # with the main generation call when the backend supports it.
         result = self.llm.generate(
             prompt=query,
             retrieved_docs=docs,
             context=None if docs else "No context provided.",
-            structured_response=self.structured_response,
+            structured_response=False,
         )
 
         confidence_score = (
