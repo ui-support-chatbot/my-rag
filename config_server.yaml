@@ -40,7 +40,6 @@ generation:
   temperature: 0.2
   reasoning_effort: "none"
   structured_response: false
-  system_prompt: "Gunakan konteks berikut untuk menjawab pertanyaan. Jika konteks tidak menjawab pertanyaan secara memadai, katakan Anda tidak tahu.\n\nKonteks:\n{context}"
 
 evaluation:
   metrics: ["faithfulness", "answer_relevancy", "context_precision", "context_recall"]

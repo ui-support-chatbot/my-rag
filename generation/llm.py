@@ -2,6 +2,7 @@ from dataclasses import dataclass
 from typing import List, Optional, Dict, Any
 import logging
 import json
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -64,9 +65,9 @@ class LLM:
 
         value = str(self.reasoning_effort).strip().lower()
         if value in {"none", "off", "false", "0"}:
-            return False
+            return "none"
         if value in {"true", "on", "1"}:
-            return True
+            return "high"
         if value in {"low", "medium", "high"}:
             return value
         return self.reasoning_effort
@@ -82,9 +83,9 @@ class LLM:
             "max_tokens": max_tokens if max_tokens is not None else self.max_tokens,
             "temperature": self.temperature,
         }
-        think_value = self._resolve_think_value()
-        if think_value is not None:
-            kwargs["extra_body"] = {"think": think_value}
+        reasoning_effort = self._resolve_think_value()
+        if reasoning_effort is not None:
+            kwargs["reasoning_effort"] = reasoning_effort
         if structured_response:
             kwargs["response_format"] = {"type": "json_object"}
         return kwargs
@@ -99,6 +100,8 @@ class LLM:
 
     @staticmethod
     def _extract_json_payload(content: str) -> Optional[Dict[str, Any]]:
+        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
+
         try:
             payload = json.loads(content)
             if isinstance(payload, dict):
@@ -169,11 +172,12 @@ class LLM:
             request_kwargs["stream"] = False
             response = self.client.chat.completions.create(**request_kwargs)
             raw_content = response.choices[0].message.content or ""
-            answer = raw_content
+            clean_content = re.sub(r"<think>.*?</think>", "", raw_content, flags=re.DOTALL).strip()
+            answer = clean_content
             confidence_score = None
 
             if structured_response:
-                payload = self._extract_json_payload(raw_content)
+                payload = self._extract_json_payload(clean_content)
                 if payload:
                     answer = str(payload.get("answer", "")).strip()
                     confidence_score = self._clamp_score(
