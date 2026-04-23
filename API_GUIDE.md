@@ -111,7 +111,9 @@ Response shape:
   "context": "...",
   "sources": [],
   "metadata": {
-    "confidence_score": 0.0
+    "query": "...",
+    "num_docs": 5,
+    "confidence_score": 0.82
   }
 }
 ```
@@ -126,6 +128,17 @@ curl -N -X POST http://152.118.31.54:8000/query/stream \
 ```
 
 Use `-N` so `curl` does not buffer the stream.
+
+Stream event order:
+
+```text
+data: {"type":"metadata","content":{"num_docs":5,"query":"..."}}
+data: {"type":"sources","content":[...]}
+data: {"type":"token","content":"..."}
+data: {"type":"confidence","content":{"confidence_score":0.82,"query":"..."}}
+```
+
+The confidence score is computed after the full answer has been generated, by comparing the query with the final answer text.
 
 ## Ingestion
 

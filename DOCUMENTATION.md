@@ -72,6 +72,15 @@ For late-stage precision, we use a **Listwise Cross-Encoder Reranker**:
   - Each chunk is prepended with its breadcrumb: `Source [Breadcrumb]: Text`.
   - The system returns an explicit list of sources (breadcrumb, filename, page) used in the answer.
   - `<think>...</think>` tags from reasoning models (e.g., Qwen, DeepSeek) are automatically stripped.
+- **Confidence Scoring**:
+  - The pipeline always generates the answer first.
+  - After the answer is complete, a second LLM call compares the **query** with the **generated answer** and returns a confidence score from `0.0` to `1.0`.
+  - The scorer uses `generation/prompts.py::CONFIDENCE_CHECK_PROMPT` as the source of truth for the calibration rules.
+  - If the confidence output cannot be parsed, the system falls back to `0.5` as a neutral score.
+- **Reasoning Model Handling**:
+  - Reasoning models may emit `<think>...</think>` blocks.
+  - The API strips those blocks from the visible answer before returning it to the client.
+  - This keeps internal reasoning hidden while preserving the final answer text.
 
 ### F. Incremental Ingestion, Deduplication & State Management
 
@@ -93,8 +102,10 @@ For a responsive user experience, the system supports real-time token streaming:
 
 - **Protocol**: Server-Sent Events (SSE).
 - **Format**:
-    - **Type: `sources`**: The first message sent contains the full list of retrieved document metadata.
+    - **Type: `metadata`**: The first message contains the query and number of retrieved docs.
+    - **Type: `sources`**: The second message contains the full list of retrieved document metadata.
     - **Type: `token`**: Subsequent messages contain individual text tokens as they are emitted by the LLM.
+    - **Type: `confidence`**: The final message contains the confidence score after the full answer has been generated.
 - **Implementation**: The pipeline uses the `stream=True` parameter in the OpenAI-compatible client, yielding chunks directly to the FastAPI `StreamingResponse`.
 
 ### H. Evaluation & Observability
