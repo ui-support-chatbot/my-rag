@@ -35,7 +35,7 @@ retrieval:
 
 generation:
   llm_endpoint: "http://127.0.0.1:11434/v1"
-  model_name: "kwangsuklee/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-GGUF"
+  model_name: "qwen3.5:latest"
   max_tokens: 512
   temperature: 0.2
   reasoning_effort: "none"
