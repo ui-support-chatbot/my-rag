@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import List, Optional, Dict, Any
 import logging
-import json
 import re
 
 logger = logging.getLogger(__name__)
@@ -77,7 +76,6 @@ class LLM:
     def _chat_request_kwargs(
         self,
         max_tokens: Optional[int] = None,
-        structured_response: bool = False,
     ) -> Dict[str, Any]:
         kwargs = {
             "model": self.model_name,
@@ -88,8 +86,6 @@ class LLM:
         reasoning_effort = self._resolve_think_value()
         if reasoning_effort is not None:
             kwargs["reasoning_effort"] = reasoning_effort
-        if structured_response:
-            kwargs["response_format"] = {"type": "json_object"}
         return kwargs
 
     @staticmethod
@@ -100,34 +96,11 @@ class LLM:
             return None
         return max(0.0, min(1.0, score))
 
-    @staticmethod
-    def _extract_json_payload(content: str) -> Optional[Dict[str, Any]]:
-        content = re.sub(r"<think>.*?</think>", "", content, flags=re.DOTALL).strip()
-
-        try:
-            payload = json.loads(content)
-            if isinstance(payload, dict):
-                return payload
-        except Exception:
-            pass
-
-        start = content.find("{")
-        end = content.rfind("}") + 1
-        if start >= 0 and end > start:
-            try:
-                payload = json.loads(content[start:end])
-                if isinstance(payload, dict):
-                    return payload
-            except Exception:
-                return None
-        return None
-
     def generate(
         self,
         prompt: str,
         retrieved_docs: Optional[List[Any]] = None,
         context: Optional[str] = None,
-        structured_response: bool = False,
     ) -> GenerationResult:
         from generation.prompts import DEFAULT_SYSTEM_PROMPT
 
@@ -154,20 +127,11 @@ class LLM:
 
         system_template = self.system_prompt or DEFAULT_SYSTEM_PROMPT
         system_content = system_template.format(context=formatted_context)
-        if structured_response:
-            system_content = (
-                system_content
-                + "\n\nReturn ONLY a valid JSON object with keys: answer, confidence_score."
-                + "\nanswer must be a plain string."
-                + "\nconfidence_score must be a number between 0 and 1."
-            )
 
         user_content = prompt
 
         try:
-            request_kwargs = self._chat_request_kwargs(
-                structured_response=structured_response
-            )
+            request_kwargs = self._chat_request_kwargs()
             request_kwargs["messages"] = [
                 {"role": "system", "content": system_content},
                 {"role": "user", "content": user_content},
@@ -177,23 +141,11 @@ class LLM:
             raw_content = response.choices[0].message.content or ""
             clean_content = re.sub(r"<think>.*?</think>", "", raw_content, flags=re.DOTALL).strip()
             answer = clean_content
-            confidence_score = None
-
-            if structured_response:
-                payload = self._extract_json_payload(clean_content)
-                if payload:
-                    answer = str(payload.get("answer", "")).strip()
-                    confidence_score = self._clamp_score(
-                        payload.get("confidence_score")
-                    )
-                else:
-                    logger.warning(
-                        "Structured LLM response was not valid JSON; falling back to raw text."
-                    )
-                    if retrieved_docs:
-                        confidence_score = self.get_confidence_score(prompt, retrieved_docs)
-            elif retrieved_docs:
-                confidence_score = self.get_confidence_score(prompt, retrieved_docs)
+            confidence_score = (
+                self.get_confidence_score(prompt, retrieved_docs)
+                if retrieved_docs
+                else None
+            )
 
             sources = []
             if retrieved_docs:

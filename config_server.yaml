@@ -38,8 +38,7 @@ generation:
   model_name: "qwen3.5:latest"
   max_tokens: 512
   temperature: 0.2
-  reasoning_effort: "none"
-  structured_response: true
+  reasoning_effort: "high"
 
 evaluation:
   metrics: ["faithfulness", "answer_relevancy", "context_precision", "context_recall"]

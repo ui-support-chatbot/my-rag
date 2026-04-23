@@ -40,7 +40,6 @@ generation:
   model_name: "llama-3-8b"
   max_tokens: 512
   temperature: 0.0
-  structured_response: false
 
 
 # Evaluation settings

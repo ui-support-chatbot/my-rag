@@ -103,7 +103,6 @@ class RAGPipeline:
             reasoning_effort=config.generation.reasoning_effort,
             system_prompt=config.generation.system_prompt,
         )
-        self.structured_response = config.generation.structured_response
         self.evaluator = None
         self.tracer = RetrievalTracer(self.retriever)
         self.ingestion_state = IngestionState(
@@ -736,7 +735,6 @@ class RAGPipeline:
             prompt=query,
             retrieved_docs=docs,
             context=None if docs else "No context provided.",
-            structured_response=False,
         )
 
         confidence_score = (
