@@ -282,8 +282,8 @@ class LLM:
                 return max(0.0, min(1.0, score))
             
             logger.warning(f"Could not parse confidence score from: {raw_output}")
-            return 0.5  # Neutral fallback
+            return 0.0  # Neutral fallback
             
         except Exception as e:
             logger.error(f"Confidence check failed: {e}")
-            return 0.5
+            return 0.0
