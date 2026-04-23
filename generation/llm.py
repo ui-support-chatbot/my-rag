@@ -28,11 +28,13 @@ class LLM:
         model_name: str = "llama-3-8b",
         max_tokens: int = 512,
         temperature: float = 0.0,
+        reasoning_effort: Optional[str] = None,
     ):
         self.endpoint = endpoint
         self.model_name = model_name
         self.max_tokens = max_tokens
         self.temperature = temperature
+        self.reasoning_effort = reasoning_effort
         self._client = None
 
     @property
@@ -50,6 +52,17 @@ class LLM:
             except Exception as e:
                 logger.warning(f"Failed to initialize OpenAI client: {e}")
         return self._client
+
+    def _chat_request_kwargs(self, max_tokens: Optional[int] = None) -> Dict[str, Any]:
+        kwargs = {
+            "model": self.model_name,
+            "messages": [],
+            "max_tokens": max_tokens if max_tokens is not None else self.max_tokens,
+            "temperature": self.temperature,
+        }
+        if self.reasoning_effort:
+            kwargs["extra_body"] = {"reasoning_effort": self.reasoning_effort}
+        return kwargs
 
     def generate(
         self,
@@ -85,16 +98,13 @@ class LLM:
         user_content = prompt
 
         try:
-            response = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": system_content},
-                    {"role": "user", "content": user_content},
-                ],
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                stream=False
-            )
+            request_kwargs = self._chat_request_kwargs()
+            request_kwargs["messages"] = [
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": user_content},
+            ]
+            request_kwargs["stream"] = False
+            response = self.client.chat.completions.create(**request_kwargs)
             answer = response.choices[0].message.content
 
             sources = []
@@ -151,16 +161,13 @@ class LLM:
         system_content = DEFAULT_SYSTEM_PROMPT.format(context=formatted_context)
 
         try:
-            stream = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": system_content},
-                    {"role": "user", "content": prompt},
-                ],
-                max_tokens=self.max_tokens,
-                temperature=self.temperature,
-                stream=True
-            )
+            request_kwargs = self._chat_request_kwargs()
+            request_kwargs["messages"] = [
+                {"role": "system", "content": system_content},
+                {"role": "user", "content": prompt},
+            ]
+            request_kwargs["stream"] = True
+            stream = self.client.chat.completions.create(**request_kwargs)
             for chunk in stream:
                 if chunk.choices[0].delta.content:
                     yield chunk.choices[0].delta.content
@@ -207,15 +214,13 @@ class LLM:
                 query=query, context=formatted_context
             )
 
-            response = self.client.chat.completions.create(
-                model=self.model_name,
-                messages=[
-                    {"role": "system", "content": system_instruction},
-                    {"role": "user", "content": user_input},
-                ],
-                max_tokens=20,
-                temperature=0.0,
-            )
+            request_kwargs = self._chat_request_kwargs(max_tokens=20)
+            request_kwargs["messages"] = [
+                {"role": "system", "content": system_instruction},
+                {"role": "user", "content": user_input},
+            ]
+            request_kwargs["temperature"] = 0.0
+            response = self.client.chat.completions.create(**request_kwargs)
             raw_output = response.choices[0].message.content.strip()
             
             # Robust parser: looks for [SCORE: X.X] or just a float.

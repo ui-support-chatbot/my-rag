@@ -100,6 +100,7 @@ class RAGPipeline:
             model_name=config.generation.model_name,
             max_tokens=config.generation.max_tokens,
             temperature=config.generation.temperature,
+            reasoning_effort=config.generation.reasoning_effort,
         )
         self.evaluator = None
         self.tracer = RetrievalTracer(self.retriever)

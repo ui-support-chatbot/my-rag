@@ -55,6 +55,7 @@ class GenerationConfig:
     model_name: str = "llama-3-8b"
     max_tokens: int = 512
     temperature: float = 0.0
+    reasoning_effort: Optional[str] = None
     system_prompt: str = (
         "Use the following context to answer the question. "
         "If the context does not contain enough information to answer, say so.\n\n"
