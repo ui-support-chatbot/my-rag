@@ -15,7 +15,7 @@ embedding:
   sparse_model: "opensearch-project/opensearch-neural-sparse-encoding-doc-v3-gte"
   device: "cuda"
   dense_device: "cuda:0"
-  sparse_device: "cpu"
+  sparse_device: "cuda:0"
   batch_size: 1
   quantize_8bit: true
 
