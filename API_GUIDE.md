@@ -37,6 +37,7 @@ http://152.118.31.54:8000/docs
 - Ingestion runs in the background, so the response comes back before processing finishes.
 - Normal ingestion writes one job-level chunk snapshot when `save_snapshots` is enabled.
 - Reranking is optional in the server deployment. If `retrieval.reranker_model` is `null` in `config_server.yaml`, the API skips reranker use and you do not need to start the reranker container.
+- Use `GET /collections` to inspect which Milvus collections are actually present before promotion or cleanup.
 
 ## Health And Storage
 

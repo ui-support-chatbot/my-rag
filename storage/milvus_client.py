@@ -108,3 +108,8 @@ class MilvusClient:
 
     def list_collections(self) -> List[str]:
         return self._client.list_collections()
+
+    def drop_collection(self, collection_name: str) -> None:
+        if self._client.has_collection(collection_name):
+            self._client.drop_collection(collection_name)
+            logger.info(f"Dropped collection: {collection_name}")

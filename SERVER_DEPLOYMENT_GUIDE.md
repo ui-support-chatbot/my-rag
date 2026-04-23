@@ -450,6 +450,23 @@ docker compose exec rag-api python cli.py rebuild-index \
   --directory /app/data
 ```
 
+The rebuild now writes a single tidy bundle under `/app/storage/rebuilds/<timestamp>/`:
+
+- `config.yaml`
+- `ingestion_state.json`
+- `rebuild_manifest.json`
+
+If you want the rebuild to keep running after your terminal disconnects, use a detached one-off Compose container and follow its logs:
+
+```bash
+docker compose run -d --name rag-rebuild --no-deps rag-api \
+  python cli.py rebuild-index \
+  --config /app/config_rag.yaml \
+  --directory /app/data
+docker compose logs -f rag-rebuild
+docker compose rm -f rag-rebuild
+```
+
 If GPU memory is tight, stop the API first so the rebuild process does not load a second copy of the embedding models:
 
 ```bash
@@ -460,13 +477,13 @@ docker compose run --rm --no-deps rag-api python cli.py rebuild-index \
 docker compose start rag-api
 ```
 
-The command writes a generated rebuild config such as `/app/config_rebuild_20260422_153000.yaml`, uses a fresh state file such as `storage/ingestion_state_rebuild_20260422_153000.json`, and ingests into a shadow collection such as `documents_rebuild_20260422_153000`.
+The command writes a generated rebuild config such as `/app/storage/rebuilds/20260422_153000/config.yaml`, uses a fresh state file such as `/app/storage/rebuilds/20260422_153000/ingestion_state.json`, and ingests into a shadow collection such as `documents_rebuild_20260422_153000`.
 
 Validate the rebuilt collection before promotion:
 
 ```bash
 docker compose exec rag-api python cli.py debug-query \
-  --config /app/config_rebuild_20260422_153000.yaml \
+  --config /app/storage/rebuilds/20260422_153000/config.yaml \
   --query "known test question" \
   --show-stages
 ```
@@ -475,14 +492,28 @@ After validation, print the exact promotion patch:
 
 ```bash
 docker compose exec rag-api python cli.py promote-index \
-  --collection-name documents_rebuild_20260422_153000 \
-  --state-path storage/ingestion_state_rebuild_20260422_153000.json
+  --rebuild-dir /app/storage/rebuilds/20260422_153000
 ```
 
 Apply the printed `collection_name` and `state_path` to `config_server.yaml`, then restart only the API:
 
 ```bash
 docker compose restart rag-api
+```
+
+Inspect the live Milvus collections any time with:
+
+```bash
+docker compose exec rag-api python cli.py collections \
+  --config /app/storage/rebuilds/20260422_153000/config.yaml
+```
+
+After the rebuilt collection is healthy, clean up the old one explicitly:
+
+```bash
+docker compose exec rag-api python cli.py cleanup-collection \
+  --rebuild-dir /app/storage/rebuilds/20260422_153000 \
+  --yes
 ```
 
 Rollback is just restoring the previous `collection_name` and `state_path` in `config_server.yaml`, then restarting `rag-api`.

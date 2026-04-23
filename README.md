@@ -35,12 +35,40 @@ When parser or chunker behavior changes, build a shadow collection with a fresh 
 python src/my_rag/cli.py rebuild-index --config config_rag.yaml --directory ./data/docs
 ```
 
-After validation, print the promotion patch:
+The rebuild now writes a tidy bundle under `storage/rebuilds/<timestamp>/`:
+
+- `config.yaml`
+- `ingestion_state.json`
+- `rebuild_manifest.json`
+
+If you want to run the rebuild in the background on the server, use a detached one-off Compose run and follow the logs:
+
+```bash
+docker compose run -d --name rag-rebuild --no-deps rag-api \
+  python cli.py rebuild-index --config /app/config_rag.yaml --directory /app/data
+docker compose logs -f rag-rebuild
+docker compose rm -f rag-rebuild
+```
+
+After validation, print the promotion patch from the rebuild folder:
 
 ```bash
 python src/my_rag/cli.py promote-index \
-  --collection-name documents_rebuild_YYYYMMDD_HHMMSS \
-  --state-path storage/ingestion_state_rebuild_YYYYMMDD_HHMMSS.json
+  --rebuild-dir storage/rebuilds/YYYYMMDD_HHMMSS
+```
+
+Check the live collections before and after promotion:
+
+```bash
+python src/my_rag/cli.py collections --config storage/rebuilds/YYYYMMDD_HHMMSS/config.yaml
+```
+
+After the rebuilt collection is healthy, clean up the old collection explicitly:
+
+```bash
+python src/my_rag/cli.py cleanup-collection \
+  --rebuild-dir storage/rebuilds/YYYYMMDD_HHMMSS \
+  --yes
 ```
 
 ### 4. Querying
