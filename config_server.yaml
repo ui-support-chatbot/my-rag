@@ -36,9 +36,10 @@ retrieval:
 generation:
   llm_endpoint: "http://127.0.0.1:11434/v1"
   model_name: "kwangsuklee/Qwen3.5-9B-Claude-4.6-Opus-Reasoning-Distilled-GGUF:latest"
-  max_tokens: 512
+  max_tokens: 1200
   temperature: 0.2
   reasoning_effort: "none"
+  structured_response: true
   system_prompt: "Gunakan konteks berikut untuk menjawab pertanyaan. Jika konteks tidak menjawab pertanyaan secara memadai, katakan Anda tidak tahu.\n\nKonteks:\n{context}"
 
 evaluation:

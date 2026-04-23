@@ -40,6 +40,7 @@ generation:
   model_name: "llama-3-8b"
   max_tokens: 512
   temperature: 0.0
+  structured_response: false
   system_prompt: |
     Use the following context to answer the question.
     If the context doesn't contain enough information, say so.

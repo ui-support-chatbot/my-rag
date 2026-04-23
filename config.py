@@ -56,6 +56,7 @@ class GenerationConfig:
     max_tokens: int = 512
     temperature: float = 0.0
     reasoning_effort: Optional[str] = None
+    structured_response: bool = False
     system_prompt: str = (
         "Use the following context to answer the question. "
         "If the context does not contain enough information to answer, say so.\n\n"

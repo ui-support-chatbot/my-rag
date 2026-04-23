@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import List, Optional, Dict, Any
 import logging
+import json
 
 logger = logging.getLogger(__name__)
 
@@ -11,6 +12,8 @@ class GenerationResult:
     context: str
     sources: List[Dict[str, Any]] = None
     metadata: Dict[str, Any] = None
+    confidence_score: Optional[float] = None
+    raw_response: Optional[str] = None
 
     def __post_init__(self):
         if self.sources is None:
@@ -24,6 +27,8 @@ class LLM:
 
     def __init__(
         self,
+        # These values are fallback defaults only; the pipeline injects
+        # config-driven runtime settings in normal app execution.
         endpoint: str = "http://localhost:8000/v1",
         model_name: str = "llama-3-8b",
         max_tokens: int = 512,
@@ -53,22 +58,71 @@ class LLM:
                 logger.warning(f"Failed to initialize OpenAI client: {e}")
         return self._client
 
-    def _chat_request_kwargs(self, max_tokens: Optional[int] = None) -> Dict[str, Any]:
+    def _resolve_think_value(self) -> Optional[Any]:
+        if self.reasoning_effort is None:
+            return None
+
+        value = str(self.reasoning_effort).strip().lower()
+        if value in {"none", "off", "false", "0"}:
+            return False
+        if value in {"true", "on", "1"}:
+            return True
+        if value in {"low", "medium", "high"}:
+            return value
+        return self.reasoning_effort
+
+    def _chat_request_kwargs(
+        self,
+        max_tokens: Optional[int] = None,
+        structured_response: bool = False,
+    ) -> Dict[str, Any]:
         kwargs = {
             "model": self.model_name,
             "messages": [],
             "max_tokens": max_tokens if max_tokens is not None else self.max_tokens,
             "temperature": self.temperature,
         }
-        if self.reasoning_effort:
-            kwargs["extra_body"] = {"reasoning_effort": self.reasoning_effort}
+        think_value = self._resolve_think_value()
+        if think_value is not None:
+            kwargs["extra_body"] = {"think": think_value}
+        if structured_response:
+            kwargs["response_format"] = {"type": "json_object"}
         return kwargs
+
+    @staticmethod
+    def _clamp_score(value: Any) -> Optional[float]:
+        try:
+            score = float(value)
+        except (TypeError, ValueError):
+            return None
+        return max(0.0, min(1.0, score))
+
+    @staticmethod
+    def _extract_json_payload(content: str) -> Optional[Dict[str, Any]]:
+        try:
+            payload = json.loads(content)
+            if isinstance(payload, dict):
+                return payload
+        except Exception:
+            pass
+
+        start = content.find("{")
+        end = content.rfind("}") + 1
+        if start >= 0 and end > start:
+            try:
+                payload = json.loads(content[start:end])
+                if isinstance(payload, dict):
+                    return payload
+            except Exception:
+                return None
+        return None
 
     def generate(
         self,
         prompt: str,
         retrieved_docs: Optional[List[Any]] = None,
         context: Optional[str] = None,
+        structured_response: bool = False,
     ) -> GenerationResult:
         from generation.prompts import DEFAULT_SYSTEM_PROMPT
 
@@ -94,18 +148,45 @@ class LLM:
             formatted_context = context or "No context provided."
 
         system_content = DEFAULT_SYSTEM_PROMPT.format(context=formatted_context)
+        if structured_response:
+            system_content = (
+                system_content
+                + "\n\nReturn ONLY a valid JSON object with keys: answer, confidence_score."
+                + "\nanswer must be a plain string."
+                + "\nconfidence_score must be a number between 0 and 1."
+            )
 
         user_content = prompt
 
         try:
-            request_kwargs = self._chat_request_kwargs()
+            request_kwargs = self._chat_request_kwargs(
+                structured_response=structured_response
+            )
             request_kwargs["messages"] = [
                 {"role": "system", "content": system_content},
                 {"role": "user", "content": user_content},
             ]
             request_kwargs["stream"] = False
             response = self.client.chat.completions.create(**request_kwargs)
-            answer = response.choices[0].message.content
+            raw_content = response.choices[0].message.content or ""
+            answer = raw_content
+            confidence_score = None
+
+            if structured_response:
+                payload = self._extract_json_payload(raw_content)
+                if payload:
+                    answer = str(payload.get("answer", "")).strip()
+                    confidence_score = self._clamp_score(
+                        payload.get("confidence_score")
+                    )
+                else:
+                    logger.warning(
+                        "Structured LLM response was not valid JSON; falling back to raw text."
+                    )
+                    if retrieved_docs:
+                        confidence_score = self.get_confidence_score(prompt, retrieved_docs)
+            elif retrieved_docs:
+                confidence_score = self.get_confidence_score(prompt, retrieved_docs)
 
             sources = []
             if retrieved_docs:
@@ -120,7 +201,11 @@ class LLM:
                 ]
 
             return GenerationResult(
-                answer=answer, context=formatted_context, sources=sources
+                answer=answer,
+                context=formatted_context,
+                sources=sources,
+                confidence_score=confidence_score,
+                raw_response=raw_content,
             )
         except Exception as e:
             logger.error(f"LLM generation failed: {e}")
@@ -128,6 +213,7 @@ class LLM:
                 answer="Error generating response",
                 context=formatted_context,
                 sources=[],
+                confidence_score=0.0 if retrieved_docs else None,
             )
 
     def generate_stream(

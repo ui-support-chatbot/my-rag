@@ -102,6 +102,7 @@ class RAGPipeline:
             temperature=config.generation.temperature,
             reasoning_effort=config.generation.reasoning_effort,
         )
+        self.structured_response = config.generation.structured_response
         self.evaluator = None
         self.tracer = RetrievalTracer(self.retriever)
         self.ingestion_state = IngestionState(
@@ -730,14 +731,19 @@ class RAGPipeline:
             f"(from {retrieved_count} retrieved candidates)"
         )
 
-        # Confidence scoring (LLM-based)
-        confidence_score = self.llm.get_confidence_score(query, docs)
-
-        # LLM.generate handles context formatting with Source [breadcrumb] markers
+        # Ask the generator for a structured JSON answer so confidence travels
+        # with the main generation call when the backend supports it.
         result = self.llm.generate(
             prompt=query,
             retrieved_docs=docs,
             context=None if docs else "No context provided.",
+            structured_response=self.structured_response,
+        )
+
+        confidence_score = (
+            result.confidence_score
+            if result.confidence_score is not None
+            else self.llm.get_confidence_score(query, docs)
         )
 
         return RAGResult(
