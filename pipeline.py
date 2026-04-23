@@ -721,10 +721,12 @@ class RAGPipeline:
         # Slice to rerank_top_k to avoid LLM token overflow.
         # After reranking, docs are sorted best-first; we take only the top N.
         rerank_top_k = self.config.retrieval.rerank_top_k
+        retrieved_count = len(docs)
         docs = docs[:rerank_top_k]
+        stage_label = "reranked" if self.retriever.reranker else "RRF-ranked"
         logger.info(
-            f"Passing top-{rerank_top_k} reranked docs to LLM "
-            f"(retrieved {len(docs)} total after RRF)"
+            f"Passing top-{len(docs)} {stage_label} docs to LLM "
+            f"(from {retrieved_count} retrieved candidates)"
         )
 
         # Confidence scoring (LLM-based)
