@@ -74,7 +74,7 @@ For late-stage precision, we use a **Listwise Cross-Encoder Reranker**:
   - `<think>...</think>` tags from reasoning models (e.g., Qwen, DeepSeek) are automatically stripped.
 - **Confidence Scoring**:
   - The confidence score is retrieval-strength only, derived from retrieval ranking evidence (`0.0` to `1.0`).
-  - The score uses the top ranked document's RRF strength (with explicit `0.0` when no documents are retrieved).
+  - The score uses top-5 RRF strengths. Each is normalized by the theoretical max fused RRF score for this pipeline (`dense + sparse`, `k=60`): `2/(60+1)`, then averaged.
   - This score is deterministic and does not trigger a second LLM confidence-check call.
   - Interpret it as evidence strength, not as a factual correctness probability.
 - **Reasoning Model Handling**:

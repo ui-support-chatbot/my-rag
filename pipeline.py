@@ -124,12 +124,26 @@ class RAGPipeline:
         if not docs:
             return 0.0
 
-        top_doc = docs[0]
-        score = top_doc.metadata.get("rrf_score", top_doc.score)
-        try:
-            return max(0.0, min(1.0, float(score)))
-        except (TypeError, ValueError):
+        # RRF in this pipeline fuses two ranked lists (dense + sparse) with k=60:
+        # score(d) = sum(1 / (k + rank_i))
+        # Max possible fused score is when rank=1 in both lists.
+        rrf_k = 60.0
+        fused_lists = 2.0
+        max_rrf_score = fused_lists / (rrf_k + 1.0)
+
+        top_n = 5
+        normalized_scores: List[float] = []
+        for doc in docs[:top_n]:
+            raw_score = doc.metadata.get("rrf_score", doc.score)
+            try:
+                normalized = float(raw_score) / max_rrf_score
+                normalized_scores.append(max(0.0, min(1.0, normalized)))
+            except (TypeError, ValueError):
+                continue
+
+        if not normalized_scores:
             return 0.0
+        return sum(normalized_scores) / len(normalized_scores)
 
     def ingest(
         self,

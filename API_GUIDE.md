@@ -37,7 +37,8 @@ http://152.118.31.54:8000/docs
 - Ingestion runs in the background, so the response comes back before processing finishes.
 - Normal ingestion writes one job-level chunk snapshot when `save_snapshots` is enabled.
 - Reranking is optional in the server deployment. If `retrieval.reranker_model` is `null` in `config_server.yaml`, the API skips reranker use and you do not need to start the reranker container.
-- `confidence_score` is retrieval-strength only. It reflects how strong the top retrieval evidence is, not factual correctness probability.
+- `confidence_score` is retrieval-strength only. It reflects how strong retrieval evidence is, not factual correctness probability.
+- The value is normalized to `0.0`-`1.0` from the top-5 RRF strengths using the current RRF setup (dense+sparse fusion, `k=60`).
 - Use `GET /collections` to inspect which Milvus collections are actually present before promotion or cleanup.
 
 ## Health And Storage
@@ -140,6 +141,7 @@ data: {"type":"confidence","content":{"confidence_score":0.82,"query":"..."}}
 ```
 
 The confidence score is retrieval-strength from ranked retrieval evidence. It is deterministic and does not trigger a second LLM confidence check.
+It is computed as the average of normalized RRF scores from the top-5 ranked documents, where each item is normalized by the theoretical max fused score: `2/(60+1)`.
 
 ## Ingestion
 
