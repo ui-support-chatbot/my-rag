@@ -50,23 +50,3 @@ Document:
 Output as JSON array:
 [{"question": "...", "answer": "..."}]
 """
-
-CONFIDENCE_CHECK_PROMPT = """You are a precise classifier.
-Task: Rate the probability (0.0 to 1.0) that the answer adequately addresses the query.
-
-Calibration Guidelines:
-- 1.0: The answer directly and fully answers the query.
-- 0.8: The answer is clearly relevant and mostly complete.
-- 0.5: The answer is partially relevant but incomplete or uncertain.
-- 0.2: The answer only loosely relates to the query.
-- 0.0: The answer is irrelevant or does not answer the query.
-
-Rules:
-- Respond with any decimal between 0.0 and 1.0.
-- Use the full range, for example 0.95, 0.72, 0.40.
-- Output only the score in this format: [SCORE: X.X]
-- Do not add any other text or explanation.
-
-Query: {query}
-Answer: {answer}
-Result: """

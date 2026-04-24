@@ -123,6 +123,7 @@ class Retriever:
                     chunk_index=entity["chunk_index"],
                     score=scores[doc_id],  # RRF fusion score
                     metadata={
+                        "rrf_score": scores[doc_id],
                         "pdf_url": entity.get("pdf_url"),
                         "page_url": entity.get("page_url"),
                         "scraped_at": entity.get("scraped_at"),
@@ -222,6 +223,7 @@ class Retriever:
         reranked = []
         for i, res in enumerate(results):
             original_doc = docs[res["index"]]
+            original_doc.metadata["rerank_score"] = float(res["relevance_score"])
             # ✅ Update score to the reranker's relevance_score (was RRF score before)
             original_doc.score = float(res["relevance_score"])
             logger.info(

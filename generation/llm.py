@@ -88,14 +88,6 @@ class LLM:
             kwargs["reasoning_effort"] = reasoning_effort
         return kwargs
 
-    @staticmethod
-    def _clamp_score(value: Any) -> Optional[float]:
-        try:
-            score = float(value)
-        except (TypeError, ValueError):
-            return None
-        return max(0.0, min(1.0, score))
-
     def generate(
         self,
         prompt: str,
@@ -154,13 +146,11 @@ class LLM:
                     for doc in retrieved_docs
                 ]
 
-            confidence_score = self.get_confidence_score(prompt, answer)
-
             return GenerationResult(
                 answer=answer,
                 context=formatted_context,
                 sources=sources,
-                confidence_score=confidence_score,
+                confidence_score=None,
                 raw_response=raw_content,
             )
         except Exception as e:
@@ -169,7 +159,7 @@ class LLM:
                 answer="Error generating response",
                 context=formatted_context,
                 sources=[],
-                confidence_score=0.0 if retrieved_docs else None,
+                confidence_score=None,
             )
 
     def generate_stream(
@@ -228,48 +218,3 @@ class LLM:
         for prompt, ctx in zip(prompts, contexts):
             results.append(self.generate(prompt, context=ctx))
         return results
-
-    def get_confidence_score(
-        self,
-        query: str,
-        answer: str,
-    ) -> float:
-        """Rate how well the answer addresses the query (0 to 1)."""
-        from generation.prompts import CONFIDENCE_CHECK_PROMPT
-        import re
-
-        if not answer or not answer.strip():
-            return 0.0
-
-        prompt = CONFIDENCE_CHECK_PROMPT.format(
-            query=query,
-            answer=answer,
-        )
-
-        try:
-            request_kwargs = self._chat_request_kwargs(max_tokens=20)
-            request_kwargs["messages"] = [
-                {"role": "system", "content": prompt},
-            ]
-            request_kwargs["temperature"] = 0.0
-            response = self.client.chat.completions.create(**request_kwargs)
-            raw_output = response.choices[0].message.content.strip()
-            
-            # Robust parser: looks for [SCORE: X.X] or just a float.
-            # 1. Try to find the score in the preferred [SCORE: X.X] format
-            format_match = re.search(r"\[SCORE:\s*(\d+\.?\d*)\]", raw_output, re.IGNORECASE)
-            if format_match:
-                return max(0.0, min(1.0, float(format_match.group(1))))
-            
-            # 2. Fallback: just look for any floating point number
-            match = re.search(r"(\d+\.?\d*)", raw_output)
-            if match:
-                score = float(match.group(1))
-                return max(0.0, min(1.0, score))
-            
-            logger.warning(f"Could not parse confidence score from: {raw_output}")
-            return 0.5  # Neutral fallback
-            
-        except Exception as e:
-            logger.error(f"Confidence check failed: {e}")
-            return 0.5

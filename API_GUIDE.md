@@ -37,6 +37,7 @@ http://152.118.31.54:8000/docs
 - Ingestion runs in the background, so the response comes back before processing finishes.
 - Normal ingestion writes one job-level chunk snapshot when `save_snapshots` is enabled.
 - Reranking is optional in the server deployment. If `retrieval.reranker_model` is `null` in `config_server.yaml`, the API skips reranker use and you do not need to start the reranker container.
+- `confidence_score` is retrieval-strength only. It reflects how strong the top retrieval evidence is, not factual correctness probability.
 - Use `GET /collections` to inspect which Milvus collections are actually present before promotion or cleanup.
 
 ## Health And Storage
@@ -138,7 +139,7 @@ data: {"type":"token","content":"..."}
 data: {"type":"confidence","content":{"confidence_score":0.82,"query":"..."}}
 ```
 
-The confidence score is computed after the full answer has been generated, by comparing the query with the final answer text.
+The confidence score is retrieval-strength from ranked retrieval evidence. It is deterministic and does not trigger a second LLM confidence check.
 
 ## Ingestion
 

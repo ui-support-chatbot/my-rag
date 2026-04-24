@@ -118,6 +118,19 @@ class RAGPipeline:
         config = RAGConfig.from_yaml(path)
         return cls(config)
 
+    @staticmethod
+    def _compute_retrieval_strength(docs: List[Any]) -> float:
+        """Return a deterministic retrieval-strength score in [0, 1]."""
+        if not docs:
+            return 0.0
+
+        top_doc = docs[0]
+        score = top_doc.metadata.get("rrf_score", top_doc.score)
+        try:
+            return max(0.0, min(1.0, float(score)))
+        except (TypeError, ValueError):
+            return 0.0
+
     def ingest(
         self,
         paths: List[str] = None,
@@ -707,7 +720,7 @@ class RAGPipeline:
           2. Milvus hybrid search -> RRF fusion (top-k candidates)
           3. Jina-v3 reranking
           4. Slice to rerank_top_k for LLM context window
-          5. Calculate confidence score
+          5. Calculate retrieval strength score
           6. Grounded generation
         """
         if pre_retrieved_docs:
@@ -737,11 +750,7 @@ class RAGPipeline:
             context=None if docs else "No context provided.",
         )
 
-        confidence_score = (
-            result.confidence_score
-            if result.confidence_score is not None
-            else self.llm.get_confidence_score(query, result.answer)
-        )
+        confidence_score = self._compute_retrieval_strength(docs)
 
         return RAGResult(
             answer=result.answer,
@@ -796,17 +805,11 @@ class RAGPipeline:
             ]
             yield f"data: {json.dumps({'type': 'sources', 'content': sources})}\n\n"
 
-            # Stream the LLM response and keep the text so we can score it after.
-            answer_chunks: List[str] = []
+            # Stream the LLM response.
             for token in self.llm.generate_stream(prompt=query, retrieved_docs=docs):
-                answer_chunks.append(token)
                 yield f"data: {json.dumps({'type': 'token', 'content': token})}\n\n"
 
-            final_answer = "".join(answer_chunks)
-            if not final_answer.strip() or final_answer.lstrip().startswith("[Error:"):
-                confidence_score = 0.0
-            else:
-                confidence_score = self.llm.get_confidence_score(query, final_answer)
+            confidence_score = self._compute_retrieval_strength(docs)
             yield f"data: {json.dumps({'type': 'confidence', 'content': {'confidence_score': confidence_score, 'query': query}})}\n\n"
 
         except Exception as e:

@@ -73,10 +73,10 @@ For late-stage precision, we use a **Listwise Cross-Encoder Reranker**:
   - The system returns an explicit list of sources (breadcrumb, filename, page) used in the answer.
   - `<think>...</think>` tags from reasoning models (e.g., Qwen, DeepSeek) are automatically stripped.
 - **Confidence Scoring**:
-  - The pipeline always generates the answer first.
-  - After the answer is complete, a second LLM call compares the **query** with the **generated answer** and returns a confidence score from `0.0` to `1.0`.
-  - The scorer uses `generation/prompts.py::CONFIDENCE_CHECK_PROMPT` as the source of truth for the calibration rules.
-  - If the confidence output cannot be parsed, the system falls back to `0.5` as a neutral score.
+  - The confidence score is retrieval-strength only, derived from retrieval ranking evidence (`0.0` to `1.0`).
+  - The score uses the top ranked document's RRF strength (with explicit `0.0` when no documents are retrieved).
+  - This score is deterministic and does not trigger a second LLM confidence-check call.
+  - Interpret it as evidence strength, not as a factual correctness probability.
 - **Reasoning Model Handling**:
   - Reasoning models may emit `<think>...</think>` blocks.
   - The API strips those blocks from the visible answer before returning it to the client.
@@ -105,7 +105,7 @@ For a responsive user experience, the system supports real-time token streaming:
     - **Type: `metadata`**: The first message contains the query and number of retrieved docs.
     - **Type: `sources`**: The second message contains the full list of retrieved document metadata.
     - **Type: `token`**: Subsequent messages contain individual text tokens as they are emitted by the LLM.
-    - **Type: `confidence`**: The final message contains the confidence score after the full answer has been generated.
+    - **Type: `confidence`**: The final message contains retrieval-strength confidence derived from ranked evidence.
 - **Implementation**: The pipeline uses the `stream=True` parameter in the OpenAI-compatible client, yielding chunks directly to the FastAPI `StreamingResponse`.
 
 ### H. Evaluation & Observability
